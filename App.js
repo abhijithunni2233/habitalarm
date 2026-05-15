@@ -4,9 +4,9 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+
 import { COLORS, SHADOW } from './src/utils/theme';
-import { requestNotificationPermissions } from './src/utils/notifications';
+
 import HomeScreen from './src/screens/HomeScreen';
 import StatsScreen from './src/screens/StatsScreen';
 import GoalsScreen from './src/screens/GoalsScreen';
@@ -40,9 +40,9 @@ function MainTabs() {
 export default function App() {
   const notifListener = useRef();
   useEffect(() => {
-    requestNotificationPermissions();
-    notifListener.current = Notifications.addNotificationReceivedListener(()=>{});
-    return () => Notifications.removeNotificationSubscription(notifListener.current);
+    
+    
+    
   }, []);
   return (
     <View style={{flex:1}}>
