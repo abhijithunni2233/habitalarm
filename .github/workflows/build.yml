@@ -32,6 +32,10 @@ jobs:
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
 
+      - name: Test JS bundle
+        run: |
+          npx expo export --platform android 2>&1 | tail -50
+
       - name: Fix Android colors
         run: |
           cat > android/app/src/main/res/values/colors.xml << 'XMLEOF'
