@@ -6,9 +6,10 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import * as Notifications from 'expo-notifications';
-import { COLORS, SHADOW } from './src/utils/theme';
-import { requestNotificationPermissions } from './src/utils/notifications';
+
+const Tab = createBottomTabNavigator();
+const Stack = createStackNavigator();
+
 import HomeScreen from './src/screens/HomeScreen';
 import StatsScreen from './src/screens/StatsScreen';
 import GoalsScreen from './src/screens/GoalsScreen';
@@ -16,8 +17,7 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import AddHabitScreen from './src/screens/AddHabitScreen';
 import HabitDetailScreen from './src/screens/HabitDetailScreen';
 
-const Tab = createBottomTabNavigator();
-const Stack = createStackNavigator();
+import { COLORS, SHADOW } from './src/utils/theme';
 
 function TabIcon({ emoji, label, focused }) {
   return (
@@ -39,24 +39,36 @@ function MainTabs() {
   );
 }
 
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex:1, alignItems:'center', justifyContent:'center', padding:20, backgroundColor:'#F0EEFF' }}>
+          <Text style={{ fontSize:24, fontWeight:'900', color:'#6C3CE1', marginBottom:10 }}>⚠️ App Error</Text>
+          <Text style={{ fontSize:12, color:'#666', textAlign:'center' }}>{this.state.error?.toString()}</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
-  const notifListener = useRef();
-  useEffect(() => {
-    requestNotificationPermissions();
-    notifListener.current = Notifications.addNotificationReceivedListener(()=>{});
-    return () => Notifications.removeNotificationSubscription(notifListener.current);
-  }, []);
   return (
-    <GestureHandlerRootView style={{ flex:1, backgroundColor:COLORS.bg }}>
-      <StatusBar style="dark" />
-      <NavigationContainer theme={{ dark:false, colors:{ primary:COLORS.primary, background:COLORS.bg, card:COLORS.bgCard, text:COLORS.text, border:COLORS.border, notification:COLORS.primary } }}>
-        <Stack.Navigator screenOptions={{ headerShown:false }}>
-          <Stack.Screen name="MainTabs" component={MainTabs}/>
-          <Stack.Screen name="AddHabit" component={AddHabitScreen} options={{ presentation:'modal' }}/>
-          <Stack.Screen name="HabitDetail" component={HabitDetailScreen} options={{ presentation:'card' }}/>
-        </Stack.Navigator>
-      </NavigationContainer>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex:1, backgroundColor:COLORS.bg }}>
+        <StatusBar style="dark" />
+        <NavigationContainer theme={{ dark:false, colors:{ primary:COLORS.primary, background:COLORS.bg, card:COLORS.bgCard, text:COLORS.text, border:COLORS.border, notification:COLORS.primary } }}>
+          <Stack.Navigator screenOptions={{ headerShown:false }}>
+            <Stack.Screen name="MainTabs" component={MainTabs}/>
+            <Stack.Screen name="AddHabit" component={AddHabitScreen} options={{ presentation:'modal' }}/>
+            <Stack.Screen name="HabitDetail" component={HabitDetailScreen} options={{ presentation:'card' }}/>
+          </Stack.Navigator>
+        </NavigationContainer>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }
 
