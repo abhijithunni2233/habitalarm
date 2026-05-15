@@ -32,6 +32,16 @@ jobs:
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
 
+      - name: Fix splash screen color
+        run: |
+          mkdir -p android/app/src/main/res/values
+          cat > android/app/src/main/res/values/colors.xml << 'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <color name="splashscreen_background">#6C3CE1</color>
+          </resources>
+          XMLEOF
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
