@@ -48,14 +48,25 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build Debug APK
+      - name: Bundle JS
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file node_modules/expo/AppEntry.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
+
+      - name: Build Release APK
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon \
+            -x bundleReleaseJsAndAssets
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: HabitAlarm-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
