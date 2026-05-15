@@ -9,7 +9,8 @@
       "package": "in.xspare.habitalarm",
       "adaptiveIcon": {
         "backgroundColor": "#6C3CE1"
-      }
+      },
+      "jsEngine": "jsc"
     },
     "plugins": [
       "expo-notifications"
