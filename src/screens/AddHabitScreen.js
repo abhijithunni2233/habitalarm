@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert } from 'react-native';
-import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Platform } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, RADIUS, SHADOW, HABIT_ICONS } from '../utils/theme';
@@ -25,18 +25,22 @@ export default function AddHabitScreen({navigation,route}) {
   const [showPicker,setShowPicker] = useState(false);
   const [editIdx,setEditIdx] = useState(null);
   const [saving,setSaving] = useState(false);
+  const [pickerDate,setPickerDate] = useState(new Date());
 
   const toggleRest = (d) => {
     Haptics.selectionAsync();
     setRestDays(p=>p.includes(d)?p.filter(x=>x!==d):[...p,d]);
   };
 
-  const handleTimeConfirm = (date) => {
-    setShowPicker(false);
-    const alarm={hour:date.getHours(),minute:date.getMinutes()};
-    if(editIdx!==null){const u=[...alarms];u[editIdx]=alarm;setAlarms(u);}
-    else setAlarms(p=>[...p,alarm]);
-    setEditIdx(null);
+  const handleTimeChange = (event, date) => {
+    if(Platform.OS==='android') setShowPicker(false);
+    if(event.type==='dismissed') return;
+    if(date) {
+      const alarm={hour:date.getHours(),minute:date.getMinutes()};
+      if(editIdx!==null){const u=[...alarms];u[editIdx]=alarm;setAlarms(u);}
+      else setAlarms(p=>[...p,alarm]);
+      setEditIdx(null);
+    }
   };
 
   const handleSave = async() => {
@@ -50,7 +54,7 @@ export default function AddHabitScreen({navigation,route}) {
       if(existing){await Storage.saveHabits(habits.map(h=>h.id===existing.id?habit:h));}
       else{await Storage.saveHabits([...habits,habit]);}
       onSave?.();navigation.goBack();
-    } catch{Alert.alert('Error','Failed to save.');}
+    } catch(e){Alert.alert('Error','Failed to save: '+e.message);}
     finally{setSaving(false);}
   };
 
@@ -98,7 +102,7 @@ export default function AddHabitScreen({navigation,route}) {
         <View style={s.sec}>
           <View style={s.rowBetween}>
             <Text style={s.label}>⏰ Alarms</Text>
-            <TouchableOpacity onPress={()=>{setEditIdx(null);setShowPicker(true);}} style={[s.addAlarmBtn,{backgroundColor:color}]}>
+            <TouchableOpacity onPress={()=>{setEditIdx(null);setPickerDate(new Date());setShowPicker(true);}} style={[s.addAlarmBtn,{backgroundColor:color}]}>
               <Text style={s.addAlarmText}>+ Add Alarm</Text>
             </TouchableOpacity>
           </View>
@@ -107,7 +111,11 @@ export default function AddHabitScreen({navigation,route}) {
             <View key={i} style={s.alarmRow}>
               <Text style={[s.alarmTime,{color}]}>{fmtAlarm(a)}</Text>
               <Text style={s.alarmRepeat}>Daily</Text>
-              <TouchableOpacity onPress={()=>{setEditIdx(i);setShowPicker(true);}} style={s.alarmEditBtn}>
+              <TouchableOpacity onPress={()=>{
+                setEditIdx(i);
+                const d=new Date();d.setHours(a.hour,a.minute);
+                setPickerDate(d);setShowPicker(true);
+              }} style={s.alarmEditBtn}>
                 <Text style={s.alarmEditText}>Edit</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={()=>setAlarms(p=>p.filter((_,j)=>j!==i))} style={s.alarmDelBtn}>
@@ -115,6 +123,9 @@ export default function AddHabitScreen({navigation,route}) {
               </TouchableOpacity>
             </View>
           ))}
+          {showPicker&&(
+            <DateTimePicker value={pickerDate} mode="time" is24Hour={false} onChange={handleTimeChange}/>
+          )}
         </View>
         <View style={s.sec}>
           <Text style={s.label}>😴 Rest Days</Text>
@@ -139,7 +150,6 @@ export default function AddHabitScreen({navigation,route}) {
           </View>
         </View>
       </ScrollView>
-      <DateTimePickerModal isVisible={showPicker} mode="time" onConfirm={handleTimeConfirm} onCancel={()=>setShowPicker(false)} is24Hour={false}/>
     </View>
   );
 }

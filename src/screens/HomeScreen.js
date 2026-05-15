@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Dimensions, RefreshControl } from 'react-native';
-import DraggableFlatList from 'react-native-draggable-flatlist';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, FlatList } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -51,7 +50,9 @@ function QuotesCard() {
 function LevelStrip({xp}) {
   const info = getLevelInfo(xp);
   const barAnim = useRef(new Animated.Value(0)).current;
-  useEffect(()=>{Animated.timing(barAnim,{toValue:info.progress,duration:900,useNativeDriver:false}).start();},[xp]);
+  useEffect(()=>{
+    Animated.timing(barAnim,{toValue:info.progress,duration:900,useNativeDriver:false}).start();
+  },[xp]);
   return (
     <View style={s.levelStrip}>
       <View style={s.levelLeft}>
@@ -71,7 +72,7 @@ function LevelStrip({xp}) {
   );
 }
 
-function HabitCard({item,drag,isActive,isCompleted,isRestDay,streak,onToggle,onPress}) {
+function HabitCard({item,isCompleted,isRestDay,streak,onToggle,onPress}) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const handleCheck = () => {
     if(isRestDay) return;
@@ -88,9 +89,9 @@ function HabitCard({item,drag,isActive,isCompleted,isRestDay,streak,onToggle,onP
     return `${dh}:${m} ${p}`;
   };
   return (
-    <Animated.View style={[s.habitCard,{backgroundColor:bg},isActive&&s.habitCardActive,{transform:[{scale:scaleAnim}]}]}>
-      <TouchableOpacity onLongPress={drag} style={s.dragZone} activeOpacity={0.9}>
-        <View style={s.habitIconBg}><Text style={s.habitIcon}>{item.icon}</Text></View>
+    <Animated.View style={[s.habitCard,{backgroundColor:bg},{transform:[{scale:scaleAnim}]}]}>
+      <TouchableOpacity style={s.habitIconBg} onPress={()=>onPress(item)}>
+        <Text style={s.habitIcon}>{item.icon}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={s.habitBody} onPress={()=>onPress(item)} activeOpacity={0.8}>
         <Text style={s.habitName}>{item.name}</Text>
@@ -141,86 +142,81 @@ export default function HomeScreen({navigation}) {
     setMoods(nm);await Storage.saveMoods(nm);
   };
 
-  const handleReorder = async({data})=>{setHabits(data);await Storage.saveHabits(data);};
-
   const activeHabits = habits.filter(h=>!h.restDays?.includes(todayDayIdx));
   const completedCount = activeHabits.filter(h=>logs[today]?.[h.id]).length;
   const todayMood = moods[today]||null;
   const dateStr = new Date().toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric'});
+  const hour = new Date().getHours();
+  const greeting = hour<12?'Morning,':hour<17?'Afternoon,':'Evening,';
 
   return (
-    <View style={{flex:1,backgroundColor:COLORS.bg}}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:20}}>
-        <View style={s.header}>
-          <View>
-            <Text style={s.greeting}>Good <Text style={{color:COLORS.primary}}>{new Date().getHours()<12?'Morning,':new Date().getHours()<17?'Afternoon,':'Evening,'}</Text></Text>
-            <Text style={s.greeting}>{user.name} 👋</Text>
-            <Text style={s.dateText}>{dateStr}</Text>
-          </View>
-          <TouchableOpacity style={s.addFab} onPress={()=>navigation.navigate('AddHabit',{onSave:load})}>
-            <LinearGradient colors={[COLORS.primary,COLORS.primaryLight]} style={s.addFabGrad}>
-              <Text style={s.addFabText}>＋</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+    <ScrollView style={{flex:1,backgroundColor:COLORS.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:100}}>
+      <View style={s.header}>
+        <View>
+          <Text style={s.greeting}>Good <Text style={{color:COLORS.primary}}>{greeting}</Text></Text>
+          <Text style={s.greeting}>{user.name} 👋</Text>
+          <Text style={s.dateText}>{dateStr}</Text>
         </View>
-        <View style={{paddingHorizontal:SPACING.md,marginBottom:SPACING.md}}><QuotesCard/></View>
-        <View style={{paddingHorizontal:SPACING.md,marginBottom:SPACING.sm}}><LevelStrip xp={user.xp}/></View>
-        <View style={s.progressCard}>
-          <View style={s.ringWrap}>
-            <View style={s.ring}>
-              <View style={[s.ringArc,{borderColor:completedCount===activeHabits.length&&activeHabits.length>0?COLORS.success:COLORS.primary}]}/>
-              <View style={s.ringInner}>
-                <Text style={s.ringPct}>{activeHabits.length>0?Math.round((completedCount/activeHabits.length)*100):0}%</Text>
-                <Text style={s.ringLabel}>done</Text>
-              </View>
+        <TouchableOpacity style={s.addFab} onPress={()=>navigation.navigate('AddHabit',{onSave:load})}>
+          <LinearGradient colors={[COLORS.primary,COLORS.primaryLight]} style={s.addFabGrad}>
+            <Text style={s.addFabText}>＋</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+      <View style={{paddingHorizontal:SPACING.md,marginBottom:SPACING.md}}><QuotesCard/></View>
+      <View style={{paddingHorizontal:SPACING.md,marginBottom:SPACING.sm}}><LevelStrip xp={user.xp}/></View>
+      <View style={s.progressCard}>
+        <View style={s.ringWrap}>
+          <View style={s.ring}>
+            <View style={[s.ringArc,{borderColor:completedCount===activeHabits.length&&activeHabits.length>0?COLORS.success:COLORS.primary}]}/>
+            <View style={s.ringInner}>
+              <Text style={s.ringPct}>{activeHabits.length>0?Math.round((completedCount/activeHabits.length)*100):0}%</Text>
+              <Text style={s.ringLabel}>done</Text>
             </View>
           </View>
-          <View style={s.progressInfo}>
-            <Text style={s.progressTitle}>Today's Progress</Text>
-            <Text style={s.progressSub}>{completedCount} of {activeHabits.length} habits done</Text>
-            {completedCount===activeHabits.length&&activeHabits.length>0&&(
-              <View style={s.allDone}><Text style={s.allDoneText}>🎉 All done!</Text></View>
-            )}
-          </View>
         </View>
-        <View style={s.sectionWrap}>
-          <Text style={s.sectionTitle}>How are you feeling?</Text>
-          <View style={s.moodRow}>
-            {MOOD_DATA.map(m=>(
-              <TouchableOpacity key={m.value} onPress={()=>handleMood(m.value)}
-                style={[s.moodBtn,todayMood===m.value&&{backgroundColor:m.color+'22',borderColor:m.color}]}>
-                <Text style={s.moodEmoji}>{m.emoji}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        <View style={s.progressInfo}>
+          <Text style={s.progressTitle}>Today's Progress</Text>
+          <Text style={s.progressSub}>{completedCount} of {activeHabits.length} habits done</Text>
+          {completedCount===activeHabits.length&&activeHabits.length>0&&(
+            <View style={s.allDone}><Text style={s.allDoneText}>🎉 All done!</Text></View>
+          )}
         </View>
-        <View style={[s.sectionWrap,{marginBottom:SPACING.xs}]}>
-          <Text style={s.sectionTitle}>Today's Habits</Text>
-          <Text style={s.sectionHint}>Long-press to reorder</Text>
+      </View>
+      <View style={s.sectionWrap}>
+        <Text style={s.sectionTitle}>How are you feeling?</Text>
+        <View style={s.moodRow}>
+          {MOOD_DATA.map(m=>(
+            <TouchableOpacity key={m.value} onPress={()=>handleMood(m.value)}
+              style={[s.moodBtn,todayMood===m.value&&{backgroundColor:m.color+'22',borderColor:m.color}]}>
+              <Text style={s.moodEmoji}>{m.emoji}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </ScrollView>
-      <DraggableFlatList
-        data={habits} keyExtractor={item=>item.id} onDragEnd={handleReorder}
-        renderItem={({item,drag,isActive})=>(
-          <HabitCard item={item} drag={drag} isActive={isActive}
+      </View>
+      <View style={s.sectionWrap}>
+        <Text style={s.sectionTitle}>Today's Habits</Text>
+      </View>
+      {habits.length===0&&(
+        <TouchableOpacity style={s.empty} onPress={()=>navigation.navigate('AddHabit',{onSave:load})}>
+          <Text style={{fontSize:52,marginBottom:SPACING.sm}}>🌱</Text>
+          <Text style={s.emptyTitle}>No habits yet!</Text>
+          <Text style={s.emptySub}>Tap here to add your first habit</Text>
+        </TouchableOpacity>
+      )}
+      {habits.map(item=>(
+        <View key={item.id} style={{paddingHorizontal:SPACING.md}}>
+          <HabitCard
+            item={item}
             isCompleted={!!logs[today]?.[item.id]}
             isRestDay={!!item.restDays?.includes(todayDayIdx)}
             streak={getStreakCount(logs,item.id)}
             onToggle={handleToggle}
             onPress={(h)=>navigation.navigate('HabitDetail',{habitId:h.id})}
           />
-        )}
-        contentContainerStyle={{paddingHorizontal:SPACING.md,paddingBottom:100}}
-        ListEmptyComponent={
-          <TouchableOpacity style={s.empty} onPress={()=>navigation.navigate('AddHabit',{onSave:load})}>
-            <Text style={{fontSize:52,marginBottom:SPACING.sm}}>🌱</Text>
-            <Text style={s.emptyTitle}>No habits yet!</Text>
-            <Text style={s.emptySub}>Tap here to add your first habit</Text>
-          </TouchableOpacity>
-        }
-        style={{flex:1}}
-      />
-    </View>
+        </View>
+      ))}
+    </ScrollView>
   );
 }
 
@@ -262,16 +258,13 @@ const s = StyleSheet.create({
   allDoneText:{fontSize:12,color:COLORS.success,fontWeight:'700'},
   sectionWrap:{paddingHorizontal:SPACING.md,marginBottom:SPACING.md},
   sectionTitle:{fontSize:16,fontWeight:'800',color:COLORS.text,marginBottom:SPACING.sm},
-  sectionHint:{fontSize:11,color:COLORS.textMuted,marginTop:-SPACING.xs},
   moodRow:{flexDirection:'row',gap:SPACING.sm},
   moodBtn:{flex:1,alignItems:'center',paddingVertical:10,backgroundColor:COLORS.bgCard,borderRadius:RADIUS.lg,borderWidth:1.5,borderColor:COLORS.border,...SHADOW.sm},
   moodEmoji:{fontSize:24},
   habitCard:{flexDirection:'row',alignItems:'center',borderRadius:RADIUS.xl,marginBottom:SPACING.sm,padding:SPACING.md,...SHADOW.card},
-  habitCardActive:{opacity:0.85},
-  dragZone:{marginRight:SPACING.sm},
-  habitIconBg:{width:46,height:46,borderRadius:14,backgroundColor:'rgba(255,255,255,0.25)',alignItems:'center',justifyContent:'center'},
+  habitIconBg:{width:46,height:46,borderRadius:14,backgroundColor:'rgba(255,255,255,0.25)',alignItems:'center',justifyContent:'center',marginRight:SPACING.sm},
   habitIcon:{fontSize:24},
-  habitBody:{flex:1,marginLeft:SPACING.sm},
+  habitBody:{flex:1},
   habitName:{fontSize:15,fontWeight:'800',color:'#fff'},
   habitMeta:{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:4},
   habitStreak:{fontSize:11,color:'rgba(255,255,255,0.85)',fontWeight:'700'},
