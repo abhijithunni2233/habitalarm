@@ -23,7 +23,7 @@ function buildDayKeys(n=14) {
 import { ScrollView as RNScrollView } from 'react-native';
 
 function HabitMatrix({habits,logs}) {
-  const dayKeys = buildDayKeys(14);
+  const dayKeys = buildDayKeys(30);
   const scrollRef = useRef(null);
   React.useEffect(()=>{setTimeout(()=>scrollRef.current?.scrollToEnd({animated:false}),100);},[]);
   if(habits.length===0) return null;
