@@ -1,9 +1,18 @@
 {
   "expo": {
-    "extra": {
-      "eas": {
-        "projectId": "394d5f14-d68d-4c9e-822f-484dcb83678c"
+    "name": "HabitAlarm",
+    "slug": "habitalarm",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "in.xspare.habitalarm",
+      "adaptiveIcon": {
+        "backgroundColor": "#6C3CE1"
       }
-    }
+    },
+    "plugins": [
+      "expo-notifications"
+    ]
   }
 }
