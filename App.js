@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  TextInput, Alert, Animated, Dimensions, Platform, Modal,
+  TextInput, Alert, Animated, Dimensions, Platform,
+  Modal, PanResponder,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,15 +11,14 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import { Audio } from 'expo-av';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    priority: Notifications.AndroidNotificationPriority.MAX,
+    shouldShowAlert: true, shouldPlaySound: true,
+    shouldSetBadge: false, priority: Notifications.AndroidNotificationPriority.MAX,
   }),
 });
 
@@ -27,10 +27,8 @@ async function setupNotifications() {
     if (!Device.isDevice) return;
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('habit-alarms', {
-        name: 'Habit Alarms',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#6C3CE1',
+        name: 'Habit Alarms', importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0,250,250,250], lightColor: '#6C3CE1',
       });
     }
     const { status } = await Notifications.requestPermissionsAsync();
@@ -41,22 +39,15 @@ async function setupNotifications() {
 async function scheduleAlarm(habit, alarm) {
   try {
     const id = `habit_${habit.id}_${alarm.hour}_${alarm.minute}`;
-    await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+    await Notifications.cancelScheduledNotificationAsync(id).catch(()=>{});
     await Notifications.scheduleNotificationAsync({
       identifier: id,
       content: {
         title: `⏰ ${habit.icon} ${habit.name}`,
         body: `Time for your habit! Keep the streak going 🔥`,
-        sound: true,
-        data: { habitId: habit.id },
-        color: habit.color || '#6C3CE1',
+        sound: true, data: { habitId: habit.id }, color: habit.color || '#6C3CE1',
       },
-      trigger: {
-        channelId: 'habit-alarms',
-        hour: alarm.hour,
-        minute: alarm.minute,
-        repeats: true,
-      },
+      trigger: { channelId:'habit-alarms', hour:alarm.hour, minute:alarm.minute, repeats:true },
     });
   } catch (e) {}
 }
@@ -65,30 +56,50 @@ async function cancelHabitAlarms(habitId) {
   try {
     const all = await Notifications.getAllScheduledNotificationsAsync();
     for (const n of all) {
-      if (n.identifier.startsWith(`habit_${habitId}`)) {
+      if (n.identifier.startsWith(`habit_${habitId}`))
         await Notifications.cancelScheduledNotificationAsync(n.identifier);
-      }
     }
   } catch (e) {}
 }
 
+async function playTick() {
+  try {
+    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+    const { sound } = await Audio.Sound.createAsync(
+      require('./assets/tick.mp3'), { shouldPlay: true, volume: 0.6 }
+    );
+    sound.setOnPlaybackStatusUpdate(s => { if (s.didJustFinish) sound.unloadAsync(); });
+  } catch (e) {}
+}
+
+async function playApplause() {
+  try {
+    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+    const { sound } = await Audio.Sound.createAsync(
+      require('./assets/applause.mp3'), { shouldPlay: true, volume: 0.8 }
+    );
+    sound.setOnPlaybackStatusUpdate(s => { if (s.didJustFinish) sound.unloadAsync(); });
+  } catch (e) {}
+}
+
 const C = {
-  bg: '#F0EEFF', card: '#FFFFFF', section: '#EAE6FF', border: '#E2DCF8',
-  primary: '#6C3CE1', primaryLight: '#8B5CF6', primaryPale: '#EDE9FF',
-  text: '#1A1040', textSub: '#6B6490', textMuted: '#B0A8CC',
-  success: '#06D6A0', successPale: '#E6FBF5',
-  danger: '#FF6B6B', dangerPale: '#FFF0F0',
-  gold: '#F4A021', goldPale: '#FFF7E6',
-  mood1: '#FF6B6B', mood2: '#FF8C42', mood3: '#FFD93D', mood4: '#8BCE6C', mood5: '#06D6A0',
-  palette: ['#4F8EF7','#FF8C42','#9B5DE5','#FF6B9D','#06D6A0','#F4A021','#4CC9F0','#F72585','#43AA8B','#E76F51'],
+  bg:'#F0EEFF', card:'#FFFFFF', section:'#EAE6FF', border:'#E2DCF8',
+  primary:'#6C3CE1', primaryLight:'#8B5CF6', primaryPale:'#EDE9FF',
+  text:'#1A1040', textSub:'#6B6490', textMuted:'#B0A8CC',
+  success:'#06D6A0', successPale:'#E6FBF5',
+  danger:'#FF6B6B', dangerPale:'#FFF0F0',
+  gold:'#F4A021', goldPale:'#FFF7E6',
+  mood1:'#FF6B6B', mood2:'#FF8C42', mood3:'#FFD93D', mood4:'#8BCE6C', mood5:'#06D6A0',
+  palette:['#4F8EF7','#FF8C42','#9B5DE5','#FF6B9D','#06D6A0','#F4A021','#4CC9F0','#F72585','#43AA8B','#E76F51'],
 };
 
-const ICONS = ['💪','🏃','📚','💧','🧘','🎯','💤','🥗','🎵','✍️','🧠','❤️','🌅','🚴','🏋️','🎨','📱','💊','🌿','☕','🦷','🧹','💰','🙏'];
-const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const DAYS_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-const REMARK_EMOJIS = ['🔥','💪','😊','⭐','🎯','✨','🙏','😤','💧','🌟','😅','❤️'];
+const ICONS=['💪','🏃','📚','💧','🧘','🎯','💤','🥗','🎵','✍️','🧠','❤️','🌅','🚴','🏋️','🎨','📱','💊','🌿','☕','🦷','🧹','💰','🙏'];
+const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const DAYS_SHORT=['Su','Mo','Tu','We','Th','Fr','Sa'];
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const REMARK_EMOJIS=['🔥','💪','😊','⭐','🎯','✨','🙏','😤','💧','🌟','😅','❤️'];
 
-const QUOTES = [
+const QUOTES=[
   {text:"Small daily improvements lead to stunning results.",author:"Robin Sharma"},
   {text:"We are what we repeatedly do. Excellence is a habit.",author:"Aristotle"},
   {text:"Motivation gets you started. Habit keeps you going.",author:"Jim Ryun"},
@@ -109,12 +120,12 @@ const QUOTES = [
   {text:"🧠 Fact: People who write goals are 42% more likely to achieve them.",author:"Dr. Gail Matthews"},
   {text:"🧠 Fact: Just 10 minutes of meditation reduces anxiety and improves focus.",author:"Harvard Study"},
   {text:"🧠 Fact: Gratitude journaling 5 min/day increases happiness by 25%.",author:"Psychology Research"},
-  {text:"🧠 Fact: Walking 30 minutes a day reduces heart disease risk by 35%.",author:"WHO"},
+  {text:"🧠 Fact: Walking 30 min a day reduces heart disease risk by 35%.",author:"WHO"},
   {text:"🧠 Fact: Drinking water first thing boosts metabolism by 24%.",author:"Health Research"},
   {text:"🧠 Fact: Sleep deprivation affects performance like being drunk.",author:"Sleep Foundation"},
 ];
 
-const LEVELS = [
+const LEVELS=[
   {level:1,xp:0,title:'Beginner'},{level:2,xp:100,title:'Apprentice'},
   {level:3,xp:250,title:'Practitioner'},{level:4,xp:500,title:'Journeyman'},
   {level:5,xp:900,title:'Expert'},{level:6,xp:1400,title:'Master'},
@@ -122,18 +133,20 @@ const LEVELS = [
   {level:9,xp:5000,title:'Mythic'},{level:10,xp:8000,title:'Transcendent'},
 ];
 
-function getLevelInfo(xp) {
+function getLevelInfo(xp){
   let current=LEVELS[0],next=LEVELS[1];
-  for(let i=LEVELS.length-1;i>=0;i--){ if(xp>=LEVELS[i].xp){current=LEVELS[i];next=LEVELS[i+1]||null;break;} }
-  return {current,next,progress:next?(xp-current.xp)/(next.xp-current.xp):1};
+  for(let i=LEVELS.length-1;i>=0;i--){if(xp>=LEVELS[i].xp){current=LEVELS[i];next=LEVELS[i+1]||null;break;}}
+  return{current,next,progress:next?(xp-current.xp)/(next.xp-current.xp):1};
 }
-
-function getTodayKey() {
+function getTodayKey(){
   const d=new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-
-function getStreak(logs,id) {
+function getDateStr(){
+  const d=new Date();
+  return`${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+function getStreak(logs,id){
   let streak=0;const today=new Date();
   for(let i=0;i<365;i++){
     const d=new Date(today);d.setDate(today.getDate()-i);
@@ -142,8 +155,7 @@ function getStreak(logs,id) {
   }
   return streak;
 }
-
-function getRate(logs,id,days=7) {
+function getRate(logs,id,days=7){
   let count=0;const today=new Date();
   for(let i=0;i<days;i++){
     const d=new Date(today);d.setDate(today.getDate()-i);
@@ -152,26 +164,130 @@ function getRate(logs,id,days=7) {
   }
   return Math.round((count/days)*100);
 }
-
-function fmtAlarm(a) {
+function fmtAlarm(a){
   const h=a.hour,m=String(a.minute).padStart(2,'0'),p=h>=12?'PM':'AM',dh=h===0?12:h>12?h-12:h;
-  return `${dh}:${m} ${p}`;
+  return`${dh}:${m} ${p}`;
 }
 
-const Store = {
+const Store={
   async get(key,def){try{const r=await AsyncStorage.getItem(key);return r?JSON.parse(r):def;}catch{return def;}},
   async set(key,val){try{await AsyncStorage.setItem(key,JSON.stringify(val));}catch{}},
 };
 
-function RemarkModal({visible,habitName,habitColor,existingRemark,onSave,onClose}) {
+// AI Local Insights
+function generateInsights(habits,logs,moods){
+  if(habits.length===0) return["Start adding habits to get personalized insights!"];
+  const insights=[];
+  const today=new Date();
+  const todayKey=getTodayKey();
+
+  // Best habit
+  const streaks=habits.map(h=>({name:h.name,icon:h.icon,streak:getStreak(logs,h.id),rate7:getRate(logs,h.id,7),rate30:getRate(logs,h.id,30)}));
+  const best=streaks.reduce((a,b)=>b.streak>a.streak?b:a,streaks[0]);
+  const worst=streaks.reduce((a,b)=>b.rate7<a.rate7?b:a,streaks[0]);
+
+  if(best.streak>=7) insights.push(`🏆 You're a champion at "${best.name}"! ${best.streak}-day streak shows real dedication.`);
+  else if(best.streak>=3) insights.push(`💪 "${best.name}" is your strongest habit with a ${best.streak}-day streak. Keep it up!`);
+  else insights.push(`🌱 You're just getting started! Try to build a 7-day streak on any habit first.`);
+
+  // Consistency
+  const avgRate=Math.round(streaks.reduce((a,b)=>a+b.rate7,0)/streaks.length);
+  if(avgRate>=80) insights.push(`⭐ Incredible! Your 7-day completion rate is ${avgRate}%. You're in the top tier of habit builders.`);
+  else if(avgRate>=50) insights.push(`📈 Your 7-day completion rate is ${avgRate}%. You're consistent — push for 80%!`);
+  else insights.push(`🎯 Your 7-day completion rate is ${avgRate}%. Focus on just 1-2 habits to build momentum.`);
+
+  // Worst habit
+  if(worst.rate7<50&&habits.length>1) insights.push(`⚠️ "${worst.name}" needs attention — only ${worst.rate7}% done this week. Try linking it to an existing habit.`);
+
+  // Mood analysis
+  const moodVals=Object.values(moods);
+  if(moodVals.length>=3){
+    const avg=(moodVals.reduce((a,b)=>a+b,0)/moodVals.length).toFixed(1);
+    if(avg>=4) insights.push(`😄 Your average mood is ${avg}/5 — you're thriving! Habits are clearly lifting your spirit.`);
+    else if(avg>=3) insights.push(`😐 Your average mood is ${avg}/5 — decent. More consistent habits usually improve mood over time.`);
+    else insights.push(`😔 Your mood has been low (${avg}/5). Try adding a self-care or exercise habit — it helps more than you think.`);
+  }
+
+  // Best day of week
+  const dayCounts=[0,0,0,0,0,0,0];
+  Object.entries(logs).forEach(([key,dayLogs])=>{
+    const d=new Date(key);
+    const completed=Object.values(dayLogs).filter(Boolean).length;
+    dayCounts[d.getDay()]+=completed;
+  });
+  const bestDayIdx=dayCounts.indexOf(Math.max(...dayCounts));
+  if(Math.max(...dayCounts)>0) insights.push(`📅 You perform best on ${DAYS[bestDayIdx]}s. Try scheduling important habits on that day.`);
+
+  // Total habits
+  const totalDone=Object.values(logs).reduce((a,d)=>a+Object.values(d).filter(Boolean).length,0);
+  if(totalDone>=100) insights.push(`🎖️ You've completed ${totalDone} habits total. That's phenomenal discipline!`);
+  else if(totalDone>=30) insights.push(`🌟 ${totalDone} habits completed so far. You're building something amazing!`);
+  else insights.push(`🚀 ${totalDone} habits completed so far. Every checkmark counts — keep going!`);
+
+  // Personality type
+  if(avgRate>=70&&best.streak>=7) insights.push(`🧠 Personality: You're a "System Builder" — you thrive on routines and consistency.`);
+  else if(avgRate>=50) insights.push(`🧠 Personality: You're a "Steady Climber" — you make progress even when motivation dips.`);
+  else insights.push(`🧠 Personality: You're an "Aspiring Achiever" — you have the vision, now build the system.`);
+
+  return insights;
+}
+
+// Splash Screen
+function SplashScreen({onDone}){
+  const wave1=useRef(new Animated.Value(0)).current;
+  const wave2=useRef(new Animated.Value(0)).current;
+  const wave3=useRef(new Animated.Value(0)).current;
+  const logoScale=useRef(new Animated.Value(0)).current;
+  const logoOpacity=useRef(new Animated.Value(0)).current;
+  const textOpacity=useRef(new Animated.Value(0)).current;
+
+  useEffect(()=>{
+    Animated.sequence([
+      Animated.parallel([
+        Animated.spring(logoScale,{toValue:1,tension:50,friction:5,useNativeDriver:true}),
+        Animated.timing(logoOpacity,{toValue:1,duration:600,useNativeDriver:true}),
+      ]),
+      Animated.timing(textOpacity,{toValue:1,duration:400,useNativeDriver:true}),
+      Animated.parallel([
+        Animated.timing(wave1,{toValue:1,duration:600,useNativeDriver:true}),
+        Animated.timing(wave2,{toValue:1,duration:800,delay:100,useNativeDriver:true}),
+        Animated.timing(wave3,{toValue:1,duration:1000,delay:200,useNativeDriver:true}),
+      ]),
+    ]).start(()=>{
+      setTimeout(onDone,400);
+    });
+  },[]);
+
+  return(
+    <View style={{flex:1,backgroundColor:C.primary,alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
+      {/* Waves */}
+      {[wave1,wave2,wave3].map((w,i)=>(
+        <Animated.View key={i} style={{
+          position:'absolute',
+          width:width*3,height:width*3,
+          borderRadius:width*1.5,
+          backgroundColor:`rgba(255,255,255,${0.05-i*0.01})`,
+          transform:[{scale:w.interpolate({inputRange:[0,1],outputRange:[0,2.5]})}],
+          opacity:w.interpolate({inputRange:[0,0.5,1],outputRange:[1,0.5,0]}),
+        }}/>
+      ))}
+      <Animated.View style={{transform:[{scale:logoScale}],opacity:logoOpacity,alignItems:'center'}}>
+        <Text style={{fontSize:80,marginBottom:16}}>⚡</Text>
+        <Animated.Text style={{fontSize:32,fontWeight:'900',color:'#fff',opacity:textOpacity}}>HabitAlarm</Animated.Text>
+        <Animated.Text style={{fontSize:14,color:'rgba(255,255,255,0.75)',marginTop:8,opacity:textOpacity}}>Build habits. Change your life.</Animated.Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+// Remark Modal
+function RemarkModal({visible,habitName,habitColor,existingRemark,onSave,onClose}){
   const [emoji,setEmoji]=useState(existingRemark?.emoji||'🔥');
   const [note,setNote]=useState(existingRemark?.note||'');
-  useEffect(()=>{
-    if(visible){setEmoji(existingRemark?.emoji||'🔥');setNote(existingRemark?.note||'');}
-  },[visible]);
+  useEffect(()=>{if(visible){setEmoji(existingRemark?.emoji||'🔥');setNote(existingRemark?.note||'');}},[visible]);
   const save=()=>{onSave({emoji,note:note.trim()});onClose();};
   const color=habitColor||C.primary;
-  return (
+  return(
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={rm.overlay} activeOpacity={1} onPress={onClose}>
         <TouchableOpacity activeOpacity={1} style={rm.sheet}>
@@ -210,7 +326,7 @@ function RemarkModal({visible,habitName,habitColor,existingRemark,onSave,onClose
   );
 }
 
-const rm = StyleSheet.create({
+const rm=StyleSheet.create({
   overlay:{flex:1,backgroundColor:'rgba(0,0,0,0.5)',justifyContent:'flex-end'},
   sheet:{backgroundColor:C.card,borderTopLeftRadius:28,borderTopRightRadius:28,overflow:'hidden'},
   sheetHeader:{padding:20,paddingTop:24},
@@ -228,7 +344,8 @@ const rm = StyleSheet.create({
   saveTxt:{color:'#fff',fontWeight:'800',fontSize:15},
 });
 
-function QuotesCard() {
+// Quotes Card
+function QuotesCard(){
   const [idx,setIdx]=useState(0);
   const tx=useRef(new Animated.Value(0)).current;
   const op=useRef(new Animated.Value(1)).current;
@@ -238,18 +355,17 @@ function QuotesCard() {
         Animated.timing(tx,{toValue:-30,duration:350,useNativeDriver:true}),
         Animated.timing(op,{toValue:0,duration:350,useNativeDriver:true}),
       ]).start(()=>{
-        tx.setValue(30);
-        setIdx(i=>(i+1)%QUOTES.length);
+        tx.setValue(30);setIdx(i=>(i+1)%QUOTES.length);
         Animated.parallel([
           Animated.spring(tx,{toValue:0,useNativeDriver:true,tension:120,friction:8}),
           Animated.timing(op,{toValue:1,duration:300,useNativeDriver:true}),
         ]).start();
       });
     },5000);
-    return ()=>clearInterval(t);
+    return()=>clearInterval(t);
   },[]);
   const q=QUOTES[idx];
-  return (
+  return(
     <LinearGradient colors={[C.primary,C.primaryLight]} style={st.quoteCard} start={{x:0,y:0}} end={{x:1,y:1}}>
       <Text style={st.quoteDecor}>"</Text>
       <Animated.View style={{flex:1,transform:[{translateX:tx}],opacity:op}}>
@@ -263,12 +379,12 @@ function QuotesCard() {
   );
 }
 
-function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,setRemarks,setHabits,onAddHabit,onHabitDetail}) {
+// Home Screen
+function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,setRemarks,setHabits,onAddHabit,onHabitDetail}){
   const today=getTodayKey();
   const dayIdx=new Date().getDay();
   const hour=new Date().getHours();
   const greeting=hour<12?'Morning,':hour<17?'Afternoon,':'Evening,';
-  const dateStr=new Date().toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric'});
   const active=habits.filter(h=>!h.restDays?.includes(dayIdx));
   const done=active.filter(h=>logs[today]?.[h.id]).length;
   const todayMood=moods[today]||null;
@@ -277,20 +393,37 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
   const [remarkModal,setRemarkModal]=useState(false);
   const [remarkHabit,setRemarkHabit]=useState(null);
   const barAnim=useRef(new Animated.Value(0)).current;
+  const fadeAnim=useRef(new Animated.Value(0)).current;
 
   useEffect(()=>{
-    Animated.timing(barAnim,{toValue:info.progress,duration:900,useNativeDriver:false}).start();
+    Animated.parallel([
+      Animated.timing(barAnim,{toValue:info.progress,duration:900,useNativeDriver:false}),
+      Animated.timing(fadeAnim,{toValue:1,duration:600,useNativeDriver:true}),
+    ]).start();
   },[user.xp]);
 
-  const toggle=async(h)=>{
+  const toggle=async(h,forceNotDone=false)=>{
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const nl={...logs};if(!nl[today])nl[today]={};
-    const was=nl[today][h.id];nl[today][h.id]=!was;
-    const newXp=Math.max(0,user.xp+(was?-10:10));
+    const was=nl[today][h.id];
+    if(forceNotDone){nl[today][h.id]=false;}
+    else{nl[today][h.id]=!was;}
+    const completing=!was&&!forceNotDone;
+    const xpDelta=completing?10:forceNotDone&&was?-10:was?-10:10;
+    const newXp=Math.max(0,user.xp+xpDelta);
     const nu={...user,xp:newXp};
     setLogs(nl);setUser(nu);
     await Store.set('logs',nl);await Store.set('user',nu);
-    if(!was){setRemarkHabit(h);setRemarkModal(true);}
+    if(completing){
+      playTick();
+      // Check perfect day
+      const newActive=habits.filter(hh=>!hh.restDays?.includes(dayIdx));
+      const newDone=newActive.filter(hh=>nl[today]?.[hh.id]).length;
+      if(newDone===newActive.length&&newActive.length>0){
+        setTimeout(()=>playApplause(),300);
+      }
+      setRemarkHabit(h);setRemarkModal(true);
+    }
   };
 
   const saveRemark=async(remark)=>{
@@ -306,17 +439,16 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
     setMoods(nm);await Store.set('moods',nm);
   };
 
-  const reorder=async(newHabits)=>{
-    setHabits(newHabits);await Store.set('habits',newHabits);
-  };
+  const reorder=async(newHabits)=>{setHabits(newHabits);await Store.set('habits',newHabits);};
 
-  return (
+  return(
+    <Animated.View style={{flex:1,opacity:fadeAnim}}>
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:100}}>
       <View style={st.header}>
         <View>
           <Text style={st.greeting}>Good <Text style={{color:C.primary}}>{greeting}</Text></Text>
           <Text style={st.greeting}>{user.name} 👋</Text>
-          <Text style={st.dateTxt}>{dateStr}</Text>
+          <Text style={st.dateTxt}>{getDateStr()}</Text>
         </View>
         <TouchableOpacity onPress={onAddHabit} style={st.fab}>
           <LinearGradient colors={[C.primary,C.primaryLight]} style={st.fabGrad}>
@@ -373,7 +505,7 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
 
       <View style={{paddingHorizontal:16,marginBottom:8}}>
         <Text style={st.secTitle}>Today's Habits</Text>
-        <Text style={{fontSize:11,color:C.textMuted,marginTop:-6}}>Long-press icon to reorder</Text>
+        <Text style={{fontSize:11,color:C.textMuted,marginTop:-6}}>Long-press icon to reorder · Swipe left for ❌</Text>
       </View>
 
       {habits.length===0&&(
@@ -390,46 +522,84 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
         const streak=getStreak(logs,h.id);
         const bg=h.color||C.palette[0];
         const remark=remarks[`${today}_${h.id}`];
-        return (
+        const swipeX=useRef(new Animated.Value(0)).current;
+        const scaleAnim=useRef(new Animated.Value(1)).current;
+
+        const panResponder=PanResponder.create({
+          onMoveShouldSetPanResponder:(_,gs)=>Math.abs(gs.dx)>10&&Math.abs(gs.dy)<30,
+          onPanResponderMove:(_,gs)=>{if(gs.dx<0)swipeX.setValue(gs.dx);},
+          onPanResponderRelease:(_,gs)=>{
+            if(gs.dx<-80){
+              Animated.timing(swipeX,{toValue:-100,duration:150,useNativeDriver:true}).start(()=>{
+                toggle(h,true);
+                Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();
+              });
+            } else {
+              Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();
+            }
+          },
+        });
+
+        const handleCheck=()=>{
+          if(isRest)return;
+          Animated.sequence([
+            Animated.spring(scaleAnim,{toValue:0.92,useNativeDriver:true}),
+            Animated.spring(scaleAnim,{toValue:1,useNativeDriver:true,tension:200}),
+          ]).start();
+          toggle(h);
+        };
+
+        return(
           <View key={h.id} style={{paddingHorizontal:16,marginBottom:10}}>
-            <View style={[st.habitCard,{backgroundColor:bg}]}>
-              <TouchableOpacity
-                onLongPress={()=>{
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                  Alert.alert('↕️ Move Habit',`Move "${h.name}" to:`,
-                    [...habits.map((_,j)=>j!==i?{
-                      text:`Position ${j+1} — ${habits[j].name}`,
-                      onPress:()=>{
-                        const arr=[...habits];
-                        const [item]=arr.splice(i,1);
-                        arr.splice(j,0,item);
-                        reorder(arr);
-                      }
-                    }:null).filter(Boolean),
-                    {text:'Cancel',style:'cancel'}]
-                  );
-                }}
-                style={st.habitIconWrap}>
-                <Text style={{fontSize:24}}>{h.icon}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>onHabitDetail(h)}>
-                <Text style={st.habitName}>{h.name}</Text>
-                <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:4}}>
-                  {streak>0&&<Text style={st.habitStreak}>🔥 {streak} day{streak>1?'s':''}</Text>}
-                  {h.alarms?.length>0&&<Text style={st.habitAlarm}>⏰ {fmtAlarm(h.alarms[0])}</Text>}
-                  {isRest&&<Text style={st.habitRest}>😴 Rest</Text>}
-                  {remark&&<Text style={st.habitRemark}>{remark.emoji}{remark.note?' · '+remark.note:''}</Text>}
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={()=>!isRest&&toggle(h)} style={st.checkBtn}>
-                <View style={[st.check,isCompleted&&st.checkDone]}>
-                  {isCompleted&&<Text style={{fontSize:16,fontWeight:'900',color:bg}}>✓</Text>}
-                </View>
-              </TouchableOpacity>
+            <View style={{position:'relative'}}>
+              {/* Not done indicator behind card */}
+              <View style={{position:'absolute',right:0,top:0,bottom:0,width:80,backgroundColor:C.danger,borderRadius:20,alignItems:'center',justifyContent:'center'}}>
+                <Text style={{fontSize:24}}>❌</Text>
+                <Text style={{fontSize:10,color:'#fff',fontWeight:'700'}}>Not done</Text>
+              </View>
+              <Animated.View {...panResponder.panHandlers}
+                style={[st.habitCard,{backgroundColor:bg},{transform:[{translateX:swipeX},{scale:scaleAnim}]}]}>
+                <TouchableOpacity
+                  onLongPress={()=>{
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    Alert.alert('↕️ Move Habit',`Move "${h.name}" to:`,
+                      [...habits.map((_,j)=>j!==i?{
+                        text:`Position ${j+1} — ${habits[j].name}`,
+                        onPress:()=>{
+                          const arr=[...habits];const[item]=arr.splice(i,1);arr.splice(j,0,item);reorder(arr);
+                        }
+                      }:null).filter(Boolean),{text:'Cancel',style:'cancel'}]
+                    );
+                  }}
+                  style={st.habitIconWrap}>
+                  <Text style={{fontSize:24}}>{h.icon}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>onHabitDetail(h)}>
+                  <Text style={st.habitName}>{h.name}</Text>
+                  <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:4}}>
+                    {streak>0&&<Text style={st.habitStreak}>🔥 {streak} day{streak>1?'s':''}</Text>}
+                    {h.alarms?.length>0&&<Text style={st.habitAlarm}>⏰ {fmtAlarm(h.alarms[0])}</Text>}
+                    {isRest&&<Text style={st.habitRest}>😴 Rest</Text>}
+                    {remark&&<Text style={st.habitRemark}>{remark.emoji}{remark.note?' · '+remark.note:''}</Text>}
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleCheck} style={st.checkBtn} disabled={isRest}>
+                  <View style={[st.check,isCompleted&&st.checkDone]}>
+                    {isCompleted&&<Text style={{fontSize:16,fontWeight:'900',color:bg}}>✓</Text>}
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
             </View>
           </View>
         );
       })}
+
+      {/* Footer */}
+      <View style={{alignItems:'center',paddingVertical:32,paddingHorizontal:16}}>
+        <Text style={{fontSize:28,marginBottom:8}}>🌴</Text>
+        <Text style={{fontSize:13,color:C.textMuted,fontWeight:'600'}}>Crafted with ❤️ in Kerala, India</Text>
+        <Text style={{fontSize:11,color:C.border,marginTop:4}}>HabitAlarm © {new Date().getFullYear()}</Text>
+      </View>
 
       <RemarkModal
         visible={remarkModal}
@@ -440,10 +610,11 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
         onClose={()=>{setRemarkModal(false);setRemarkHabit(null);}}
       />
     </ScrollView>
+    </Animated.View>
   );
 }
 
-function AddHabitScreen({existing,onSave,onBack}) {
+function AddHabitScreen({existing,onSave,onBack}){
   const [name,setName]=useState(existing?.name||'');
   const [icon,setIcon]=useState(existing?.icon||'💪');
   const [color,setColor]=useState(existing?.color||C.palette[0]);
@@ -474,14 +645,14 @@ function AddHabitScreen({existing,onSave,onBack}) {
       createdAt:existing?.createdAt||new Date().toISOString()
     };
     await cancelHabitAlarms(habit.id);
-    for(const a of alarms) await scheduleAlarm(habit,a);
+    for(const a of alarms)await scheduleAlarm(habit,a);
     const habits=await Store.get('habits',[]);
     if(existing){await Store.set('habits',habits.map(h=>h.id===existing.id?habit:h));}
     else{await Store.set('habits',[...habits,habit]);}
     setSaving(false);onSave();
   };
 
-  return (
+  return(
     <View style={{flex:1,backgroundColor:C.bg}}>
       <LinearGradient colors={[C.primary,C.primaryLight]} style={st.modalHeader}>
         <TouchableOpacity onPress={onBack} style={st.closeBtn}><Text style={st.closeTxt}>✕</Text></TouchableOpacity>
@@ -498,7 +669,6 @@ function AddHabitScreen({existing,onSave,onBack}) {
             placeholder="e.g. Morning Run" placeholderTextColor={C.textMuted}
             maxLength={40} autoFocus={!existing}/>
         </View>
-
         <Text style={[st.label,{marginTop:20}]}>ICON</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:6}}>
           {ICONS.map(ic=>(
@@ -508,18 +678,15 @@ function AddHabitScreen({existing,onSave,onBack}) {
             </TouchableOpacity>
           ))}
         </View>
-
         <Text style={[st.label,{marginTop:20}]}>COLOR</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>
           {C.palette.map(c=>(
             <TouchableOpacity key={c} onPress={()=>{Haptics.selectionAsync();setColor(c);}}
-              style={[{width:36,height:36,borderRadius:18,backgroundColor:c,alignItems:'center',justifyContent:'center'},
-                color===c&&{borderWidth:3,borderColor:'#fff'}]}>
+              style={[{width:36,height:36,borderRadius:18,backgroundColor:c,alignItems:'center',justifyContent:'center'},color===c&&{borderWidth:3,borderColor:'#fff'}]}>
               {color===c&&<Text style={{color:'#fff',fontWeight:'900'}}>✓</Text>}
             </TouchableOpacity>
           ))}
         </View>
-
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginTop:20,marginBottom:8}}>
           <Text style={st.label}>⏰ ALARMS</Text>
           <TouchableOpacity onPress={()=>{setEditIdx(null);setPickerDate(new Date());setShowPicker(true);}}
@@ -542,7 +709,6 @@ function AddHabitScreen({existing,onSave,onBack}) {
           </View>
         ))}
         {showPicker&&<DateTimePicker value={pickerDate} mode="time" is24Hour={false} onChange={handleTime}/>}
-
         <Text style={[st.label,{marginTop:20}]}>😴 REST DAYS</Text>
         <View style={{flexDirection:'row',gap:6}}>
           {DAYS_SHORT.map((d,i)=>(
@@ -552,7 +718,6 @@ function AddHabitScreen({existing,onSave,onBack}) {
             </TouchableOpacity>
           ))}
         </View>
-
         <Text style={[st.label,{marginTop:20}]}>PREVIEW</Text>
         <View style={[st.habitCard,{backgroundColor:color}]}>
           <View style={st.habitIconWrap}><Text style={{fontSize:24}}>{icon}</Text></View>
@@ -567,31 +732,26 @@ function AddHabitScreen({existing,onSave,onBack}) {
   );
 }
 
-function StatsScreen({habits,logs,moods}) {
+function StatsScreen({habits,logs,moods}){
   const matrixRef=useRef(null);
   const totalDone=Object.values(logs).reduce((a,d)=>a+Object.values(d).filter(Boolean).length,0);
   const bestStreak=habits.reduce((b,h)=>{const s=getStreak(logs,h.id);return s>b?s:b;},0);
   const mv=Object.values(moods);
   const avgMood=mv.length>0?(mv.reduce((a,b)=>a+b,0)/mv.length).toFixed(1):'—';
-
   const dayKeys=[];
   for(let i=29;i>=0;i--){
     const d=new Date();d.setDate(d.getDate()-i);
     const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     dayKeys.push({key,label:DAYS_SHORT[d.getDay()],date:d.getDate(),isToday:i===0});
   }
+  useEffect(()=>{setTimeout(()=>matrixRef.current?.scrollToEnd({animated:false}),300);},[]);
 
-  useEffect(()=>{
-    setTimeout(()=>matrixRef.current?.scrollToEnd({animated:false}),300);
-  },[]);
-
-  return (
+  return(
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:80}}>
       <LinearGradient colors={[C.primary,C.primaryLight]} style={st.screenHeader} start={{x:0,y:0}} end={{x:1,y:1}}>
         <Text style={st.screenHeaderTitle}>📊 Statistics</Text>
         <Text style={st.screenHeaderSub}>Your habit insights</Text>
       </LinearGradient>
-
       <View style={{flexDirection:'row',gap:10,paddingHorizontal:16,marginBottom:16}}>
         {[{v:totalDone,l:'Total Done',bg:'#4F8EF7'},{v:`🔥${bestStreak}`,l:'Best Streak',bg:C.gold},{v:avgMood,l:'Avg Mood',bg:C.success}].map((x,i)=>(
           <View key={i} style={[st.overviewCard,{backgroundColor:x.bg}]}>
@@ -600,7 +760,6 @@ function StatsScreen({habits,logs,moods}) {
           </View>
         ))}
       </View>
-
       {habits.length>0&&(
         <View style={{marginHorizontal:16,marginBottom:16,backgroundColor:C.card,borderRadius:20,padding:16}}>
           <Text style={{fontSize:15,fontWeight:'800',color:C.text}}>📅 30-Day Matrix</Text>
@@ -629,7 +788,7 @@ function StatsScreen({habits,logs,moods}) {
                   <View key={h.id} style={{flexDirection:'row',height:36,alignItems:'center',borderBottomWidth:1,borderBottomColor:C.border}}>
                     {dayKeys.map(dk=>{
                       const done=!!(logs[dk.key]&&logs[dk.key][h.id]);
-                      return (
+                      return(
                         <View key={dk.key} style={{width:36,alignItems:'center'}}>
                           <View style={[{width:24,height:24,borderRadius:6,alignItems:'center',justifyContent:'center'},
                             {backgroundColor:done?(h.color||C.primary):C.section},
@@ -646,7 +805,6 @@ function StatsScreen({habits,logs,moods}) {
           </View>
         </View>
       )}
-
       <View style={{paddingHorizontal:16}}>
         <Text style={st.secTitle}>Habit Breakdown</Text>
         {habits.length===0&&<Text style={{fontSize:13,color:C.textMuted,textAlign:'center',paddingVertical:20}}>No habits yet</Text>}
@@ -654,7 +812,7 @@ function StatsScreen({habits,logs,moods}) {
           const streak=getStreak(logs,h.id);
           const r7=getRate(logs,h.id,7);
           const r30=getRate(logs,h.id,30);
-          return (
+          return(
             <View key={h.id} style={st.breakdownCard}>
               <View style={{width:44,height:44,borderRadius:14,backgroundColor:h.color||C.primary,alignItems:'center',justifyContent:'center'}}>
                 <Text style={{fontSize:20}}>{h.icon}</Text>
@@ -677,7 +835,7 @@ function StatsScreen({habits,logs,moods}) {
   );
 }
 
-function GoalsScreen({goals,setGoals}) {
+function GoalsScreen({goals,setGoals}){
   const [showAdd,setShowAdd]=useState(false);
   const [title,setTitle]=useState('');
   const [target,setTarget]=useState('30');
@@ -708,7 +866,7 @@ function GoalsScreen({goals,setGoals}) {
     ]);
   };
 
-  return (
+  return(
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:80}}>
       <LinearGradient colors={['#FF6B9D','#FF8C42']} style={st.screenHeader} start={{x:0,y:0}} end={{x:1,y:1}}>
         <Text style={st.screenHeaderTitle}>🎯 Goals & Rewards</Text>
@@ -717,7 +875,6 @@ function GoalsScreen({goals,setGoals}) {
           <Text style={{color:'#fff',fontWeight:'800',fontSize:14}}>{showAdd?'✕ Cancel':'＋ New Goal'}</Text>
         </TouchableOpacity>
       </LinearGradient>
-
       {showAdd&&(
         <View style={{margin:16,backgroundColor:C.card,borderRadius:20,padding:16}}>
           <Text style={{fontSize:17,fontWeight:'800',color:C.text,marginBottom:12}}>Create Goal</Text>
@@ -750,7 +907,6 @@ function GoalsScreen({goals,setGoals}) {
           </TouchableOpacity>
         </View>
       )}
-
       <View style={{paddingHorizontal:16}}>
         {goals.length===0&&!showAdd&&(
           <View style={st.empty}>
@@ -762,7 +918,7 @@ function GoalsScreen({goals,setGoals}) {
         {goals.map(g=>{
           const pct=Math.min(g.current/g.target,1);
           const done=g.current>=g.target;
-          return (
+          return(
             <View key={g.id} style={[st.goalCard,done&&{borderColor:C.success+'60'}]}>
               <View style={{flexDirection:'row',alignItems:'flex-start',gap:10,marginBottom:10}}>
                 <View style={{width:52,height:52,borderRadius:14,backgroundColor:C.primaryPale,alignItems:'center',justifyContent:'center'}}>
@@ -801,12 +957,14 @@ function GoalsScreen({goals,setGoals}) {
   );
 }
 
-function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMoods}) {
+function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMoods}){
   const [editName,setEditName]=useState(false);
   const [tmpName,setTmpName]=useState('');
+  const [showInsights,setShowInsights]=useState(false);
   const info=getLevelInfo(user.xp);
   const bestStreak=habits.reduce((b,h)=>{const s=getStreak(logs,h.id);return s>b?s:b;},0);
   const totalDone=Object.values(logs).reduce((a,d)=>a+Object.values(d).filter(Boolean).length,0);
+  const insights=generateInsights(habits,logs,moods);
 
   const BADGES=[
     {e:'🌱',l:'First Habit',d:'Create first habit',ok:()=>habits.length>=1},
@@ -842,7 +1000,7 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
     }},
   ]);
 
-  return (
+  return(
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:80}}>
       <LinearGradient colors={[C.primary,'#4CC9F0']} style={[st.screenHeader,{alignItems:'center',paddingBottom:30}]} start={{x:0,y:0}} end={{x:1,y:1}}>
         <View style={{width:88,height:88,borderRadius:44,borderWidth:4,borderColor:'rgba(255,255,255,0.5)',padding:3,marginBottom:12}}>
@@ -860,6 +1018,28 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
           <Text style={{color:'#fff',fontWeight:'700',fontSize:13}}>⚡ Level {info.current.level} · {info.current.title}</Text>
         </View>
       </LinearGradient>
+
+      {/* AI Insights */}
+      <View style={{marginHorizontal:16,marginBottom:16,backgroundColor:C.card,borderRadius:20,overflow:'hidden'}}>
+        <TouchableOpacity onPress={()=>setShowInsights(v=>!v)} style={{padding:16}}>
+          <LinearGradient colors={[C.primary,C.primaryLight]} style={{borderRadius:12,padding:14,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+            <View>
+              <Text style={{fontSize:15,fontWeight:'800',color:'#fff'}}>🧠 AI Habit Insights</Text>
+              <Text style={{fontSize:12,color:'rgba(255,255,255,0.80)',marginTop:2}}>Tap to see your habit personality</Text>
+            </View>
+            <Text style={{fontSize:24}}>{showInsights?'▲':'▼'}</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+        {showInsights&&(
+          <View style={{paddingHorizontal:16,paddingBottom:16}}>
+            {insights.map((insight,i)=>(
+              <View key={i} style={{flexDirection:'row',gap:10,marginBottom:12,backgroundColor:C.section,borderRadius:12,padding:12}}>
+                <Text style={{fontSize:13,color:C.text,flex:1,lineHeight:20}}>{insight}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
 
       <View style={{marginHorizontal:16,marginBottom:16,backgroundColor:C.card,borderRadius:20,padding:16}}>
         <View style={{flexDirection:'row',justifyContent:'space-between',marginBottom:8}}>
@@ -892,7 +1072,7 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>
           {BADGES.map((b,i)=>{
             const ok=b.ok();
-            return (
+            return(
               <View key={i} style={[{width:'47%',backgroundColor:C.card,borderRadius:20,padding:16,alignItems:'center',borderWidth:1.5},ok?{borderColor:C.primaryPale}:{borderColor:C.border}]}>
                 <Text style={{fontSize:30,marginBottom:6,opacity:ok?1:0.2}}>{b.e}</Text>
                 <Text style={{fontSize:12,fontWeight:'800',color:ok?C.text:C.textMuted,textAlign:'center'}}>{b.l}</Text>
@@ -904,7 +1084,7 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
         </View>
       </View>
 
-      <View style={{paddingHorizontal:16}}>
+      <View style={{paddingHorizontal:16,marginBottom:16}}>
         <TouchableOpacity onPress={reset} style={{backgroundColor:C.dangerPale,borderRadius:12,padding:16,alignItems:'center',borderWidth:1.5,borderColor:C.danger+'40'}}>
           <Text style={{color:C.danger,fontWeight:'700',fontSize:14}}>🗑️ Reset All Data</Text>
         </TouchableOpacity>
@@ -913,7 +1093,7 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
   );
 }
 
-function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
+function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}){
   const streak=getStreak(logs,habit.id);
   const r7=getRate(logs,habit.id,7);
   const r30=getRate(logs,habit.id,30);
@@ -925,7 +1105,7 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
     const remark=remarks[`${key}_${habit.id}`];
     days.push({key,date:d.getDate(),done:!!(logs[key]&&logs[key][habit.id]),isToday:i===0,remark});
   }
-  return (
+  return(
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:60}}>
       <LinearGradient colors={[color,color+'BB']} style={[st.screenHeader,{alignItems:'center'}]} start={{x:0,y:0}} end={{x:1,y:1}}>
         <TouchableOpacity onPress={onBack} style={{alignSelf:'flex-start',marginBottom:12}}>
@@ -937,7 +1117,6 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
           <Text style={{color:'#fff',fontWeight:'800',fontSize:15}}>🔥 {streak} day{streak!==1?'s':''} streak</Text>
         </View>
       </LinearGradient>
-
       <View style={{flexDirection:'row',gap:10,paddingHorizontal:16,marginBottom:16}}>
         {[{v:`${r7}%`,l:'7-day rate'},{v:`${r30}%`,l:'30-day rate'},{v:streak,l:'Streak'}].map((x,i)=>(
           <View key={i} style={[st.statCard,{borderTopColor:color,borderTopWidth:4}]}>
@@ -946,7 +1125,6 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
           </View>
         ))}
       </View>
-
       {habit.alarms?.length>0&&(
         <View style={{paddingHorizontal:16,marginBottom:16}}>
           <Text style={st.secTitle}>⏰ Alarms</Text>
@@ -958,7 +1136,6 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
           ))}
         </View>
       )}
-
       {habit.restDays?.length>0&&(
         <View style={{paddingHorizontal:16,marginBottom:16}}>
           <Text style={st.secTitle}>😴 Rest Days</Text>
@@ -971,7 +1148,6 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
           </View>
         </View>
       )}
-
       <View style={{paddingHorizontal:16,marginBottom:16}}>
         <Text style={st.secTitle}>📅 Last 35 Days</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:5}}>
@@ -981,12 +1157,11 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
               d.isToday&&{borderWidth:2,borderColor:color}]}>
               <Text style={{fontSize:10,fontWeight:'700',color:d.done?'#fff':C.textSub}}>{d.date}</Text>
               {d.done&&<Text style={{fontSize:9,color:'#fff',fontWeight:'900'}}>✓</Text>}
-              {d.remark&&<Text style={{fontSize:10}}>{d.remark.emoji}</Text>}
+              {d.remark&&<Text style={{fontSize:9}}>{d.remark.emoji}</Text>}
             </View>
           ))}
         </View>
       </View>
-
       <View style={{paddingHorizontal:16,gap:10}}>
         <TouchableOpacity onPress={onEdit}>
           <LinearGradient colors={[color,color+'CC']} style={{borderRadius:12,padding:16,alignItems:'center'}}>
@@ -1001,7 +1176,8 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
   );
 }
 
-export default function App() {
+export default function App(){
+  const [showSplash,setShowSplash]=useState(true);
   const [screen,setScreen]=useState('main');
   const [habits,setHabits]=useState([]);
   const [logs,setLogs]=useState({});
@@ -1037,20 +1213,22 @@ export default function App() {
     ]);
   };
 
+  if(showSplash) return <SplashScreen onDone={()=>setShowSplash(false)}/>;
+
   const renderScreen=()=>{
-    if(screen==='addHabit') return (
+    if(screen==='addHabit') return(
       <AddHabitScreen existing={editHabit}
         onBack={()=>{setScreen('main');setEditHabit(null);}}
         onSave={async()=>{await reloadHabits();setScreen('main');setEditHabit(null);}}/>
     );
-    if(screen==='habitDetail'&&detailHabit) return (
+    if(screen==='habitDetail'&&detailHabit) return(
       <HabitDetailScreen
         habit={detailHabit} logs={logs} remarks={remarks}
         onBack={()=>{setScreen('main');setDetailHabit(null);}}
         onEdit={()=>{setEditHabit(detailHabit);setScreen('addHabit');}}
         onDelete={()=>deleteHabit(detailHabit.id)}/>
     );
-    return (
+    return(
       <View style={{flex:1}}>
         {tab==='home'&&(
           <HomeScreen habits={habits} logs={logs} moods={moods} user={user} remarks={remarks}
@@ -1079,7 +1257,7 @@ export default function App() {
     );
   };
 
-  return (
+  return(
     <View style={{flex:1,backgroundColor:C.bg}}>
       <StatusBar style="dark"/>
       {renderScreen()}
