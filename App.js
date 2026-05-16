@@ -1,26 +1,93 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  TextInput, Alert, Animated, Dimensions, Platform, Modal,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 
 const { width } = Dimensions.get('window');
 
-// ── Colors ──────────────────────────────────────────────────────────────────
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    priority: Notifications.AndroidNotificationPriority.MAX,
+  }),
+});
+
+async function setupNotifications() {
+  try {
+    if (!Device.isDevice) return;
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('habit-alarms', {
+        name: 'Habit Alarms',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#6C3CE1',
+      });
+    }
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
+  } catch (e) { return false; }
+}
+
+async function scheduleAlarm(habit, alarm) {
+  try {
+    const id = `habit_${habit.id}_${alarm.hour}_${alarm.minute}`;
+    await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+    await Notifications.scheduleNotificationAsync({
+      identifier: id,
+      content: {
+        title: `⏰ ${habit.icon} ${habit.name}`,
+        body: `Time for your habit! Keep the streak going 🔥`,
+        sound: true,
+        data: { habitId: habit.id },
+        color: habit.color || '#6C3CE1',
+      },
+      trigger: {
+        channelId: 'habit-alarms',
+        hour: alarm.hour,
+        minute: alarm.minute,
+        repeats: true,
+      },
+    });
+  } catch (e) {}
+}
+
+async function cancelHabitAlarms(habitId) {
+  try {
+    const all = await Notifications.getAllScheduledNotificationsAsync();
+    for (const n of all) {
+      if (n.identifier.startsWith(`habit_${habitId}`)) {
+        await Notifications.cancelScheduledNotificationAsync(n.identifier);
+      }
+    }
+  } catch (e) {}
+}
+
 const C = {
-  bg:'#F0EEFF', card:'#FFFFFF', section:'#EAE6FF', border:'#E2DCF8',
-  primary:'#6C3CE1', primaryLight:'#8B5CF6', primaryPale:'#EDE9FF',
-  text:'#1A1040', textSub:'#6B6490', textMuted:'#B0A8CC',
-  success:'#06D6A0', successPale:'#E6FBF5',
-  danger:'#FF6B6B', dangerPale:'#FFF0F0',
-  gold:'#F4A021', goldPale:'#FFF7E6',
-  mood1:'#FF6B6B', mood2:'#FF8C42', mood3:'#FFD93D', mood4:'#8BCE6C', mood5:'#06D6A0',
-  palette:['#4F8EF7','#FF8C42','#9B5DE5','#FF6B9D','#06D6A0','#F4A021','#4CC9F0','#F72585','#43AA8B','#E76F51'],
+  bg: '#F0EEFF', card: '#FFFFFF', section: '#EAE6FF', border: '#E2DCF8',
+  primary: '#6C3CE1', primaryLight: '#8B5CF6', primaryPale: '#EDE9FF',
+  text: '#1A1040', textSub: '#6B6490', textMuted: '#B0A8CC',
+  success: '#06D6A0', successPale: '#E6FBF5',
+  danger: '#FF6B6B', dangerPale: '#FFF0F0',
+  gold: '#F4A021', goldPale: '#FFF7E6',
+  mood1: '#FF6B6B', mood2: '#FF8C42', mood3: '#FFD93D', mood4: '#8BCE6C', mood5: '#06D6A0',
+  palette: ['#4F8EF7','#FF8C42','#9B5DE5','#FF6B9D','#06D6A0','#F4A021','#4CC9F0','#F72585','#43AA8B','#E76F51'],
 };
 
 const ICONS = ['💪','🏃','📚','💧','🧘','🎯','💤','🥗','🎵','✍️','🧠','❤️','🌅','🚴','🏋️','🎨','📱','💊','🌿','☕','🦷','🧹','💰','🙏'];
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const DAYS_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+const REMARK_EMOJIS = ['🔥','💪','😊','⭐','🎯','✨','🙏','😤','💧','🌟','😅','❤️'];
+
 const QUOTES = [
   {text:"Small daily improvements lead to stunning results.",author:"Robin Sharma"},
   {text:"We are what we repeatedly do. Excellence is a habit.",author:"Aristotle"},
@@ -28,9 +95,25 @@ const QUOTES = [
   {text:"The secret of your future is hidden in your daily routine.",author:"Mike Murdock"},
   {text:"Habits are the compound interest of self-improvement.",author:"James Clear"},
   {text:"Do something today that your future self will thank you for.",author:"Sean Patrick Flanery"},
+  {text:"You don't rise to your goals, you fall to your systems.",author:"James Clear"},
+  {text:"The chains of habit are too light to be felt until too heavy to be broken.",author:"Warren Buffett"},
+  {text:"Successful people are simply those with successful habits.",author:"Brian Tracy"},
+  {text:"The mind is everything. What you think you become.",author:"Buddha"},
+  {text:"Take care of your body. It's the only place you have to live.",author:"Jim Rohn"},
+  {text:"Believe you can and you're halfway there.",author:"Theodore Roosevelt"},
+  {text:"It always seems impossible until it's done.",author:"Nelson Mandela"},
+  {text:"The secret of getting ahead is getting started.",author:"Mark Twain"},
+  {text:"Energy and persistence conquer all things.",author:"Benjamin Franklin"},
+  {text:"🧠 Fact: It takes 66 days on average to form a new habit, not 21.",author:"UCL Research"},
+  {text:"🧠 Fact: Exercise boosts brain function and memory by up to 20%.",author:"Neuroscience"},
+  {text:"🧠 Fact: People who write goals are 42% more likely to achieve them.",author:"Dr. Gail Matthews"},
+  {text:"🧠 Fact: Just 10 minutes of meditation reduces anxiety and improves focus.",author:"Harvard Study"},
+  {text:"🧠 Fact: Gratitude journaling 5 min/day increases happiness by 25%.",author:"Psychology Research"},
+  {text:"🧠 Fact: Walking 30 minutes a day reduces heart disease risk by 35%.",author:"WHO"},
+  {text:"🧠 Fact: Drinking water first thing boosts metabolism by 24%.",author:"Health Research"},
+  {text:"🧠 Fact: Sleep deprivation affects performance like being drunk.",author:"Sleep Foundation"},
 ];
-const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const DAYS_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
 const LEVELS = [
   {level:1,xp:0,title:'Beginner'},{level:2,xp:100,title:'Apprentice'},
   {level:3,xp:250,title:'Practitioner'},{level:4,xp:500,title:'Journeyman'},
@@ -42,8 +125,7 @@ const LEVELS = [
 function getLevelInfo(xp) {
   let current=LEVELS[0],next=LEVELS[1];
   for(let i=LEVELS.length-1;i>=0;i--){ if(xp>=LEVELS[i].xp){current=LEVELS[i];next=LEVELS[i+1]||null;break;} }
-  const progress=next?(xp-current.xp)/(next.xp-current.xp):1;
-  return {current,next,progress};
+  return {current,next,progress:next?(xp-current.xp)/(next.xp-current.xp):1};
 }
 
 function getTodayKey() {
@@ -76,13 +158,76 @@ function fmtAlarm(a) {
   return `${dh}:${m} ${p}`;
 }
 
-// ── Storage ──────────────────────────────────────────────────────────────────
 const Store = {
-  async get(key,def) { try{const r=await AsyncStorage.getItem(key);return r?JSON.parse(r):def;}catch{return def;} },
-  async set(key,val) { try{await AsyncStorage.setItem(key,JSON.stringify(val));}catch{} },
+  async get(key,def){try{const r=await AsyncStorage.getItem(key);return r?JSON.parse(r):def;}catch{return def;}},
+  async set(key,val){try{await AsyncStorage.setItem(key,JSON.stringify(val));}catch{}},
 };
 
-// ── Quotes Card ───────────────────────────────────────────────────────────────
+function RemarkModal({visible,habitName,habitColor,existingRemark,onSave,onClose}) {
+  const [emoji,setEmoji]=useState(existingRemark?.emoji||'🔥');
+  const [note,setNote]=useState(existingRemark?.note||'');
+  useEffect(()=>{
+    if(visible){setEmoji(existingRemark?.emoji||'🔥');setNote(existingRemark?.note||'');}
+  },[visible]);
+  const save=()=>{onSave({emoji,note:note.trim()});onClose();};
+  const color=habitColor||C.primary;
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={rm.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={rm.sheet}>
+          <LinearGradient colors={[color,C.primaryLight]} style={rm.sheetHeader}>
+            <Text style={rm.sheetTitle}>✅ Great job!</Text>
+            <Text style={rm.sheetSub}>Add a remark for <Text style={{fontWeight:'900'}}>{habitName}</Text></Text>
+          </LinearGradient>
+          <View style={rm.body}>
+            <Text style={rm.label}>How did it feel?</Text>
+            <View style={rm.emojiRow}>
+              {REMARK_EMOJIS.map(e=>(
+                <TouchableOpacity key={e} onPress={()=>{Haptics.selectionAsync();setEmoji(e);}}
+                  style={[rm.emojiBtn,emoji===e&&{backgroundColor:color+'22',borderColor:color,borderWidth:2}]}>
+                  <Text style={{fontSize:26}}>{e}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[rm.label,{marginTop:16}]}>Note (optional)</Text>
+            <TextInput style={rm.noteInput} value={note} onChangeText={setNote}
+              placeholder="e.g. Felt great today!" placeholderTextColor={C.textMuted}
+              maxLength={100} multiline/>
+            <View style={rm.btnRow}>
+              <TouchableOpacity onPress={onClose} style={rm.skipBtn}>
+                <Text style={rm.skipTxt}>Skip</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={save} style={{flex:1}}>
+                <LinearGradient colors={[color,C.primaryLight]} style={rm.saveBtn}>
+                  <Text style={rm.saveTxt}>Save Remark</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+const rm = StyleSheet.create({
+  overlay:{flex:1,backgroundColor:'rgba(0,0,0,0.5)',justifyContent:'flex-end'},
+  sheet:{backgroundColor:C.card,borderTopLeftRadius:28,borderTopRightRadius:28,overflow:'hidden'},
+  sheetHeader:{padding:20,paddingTop:24},
+  sheetTitle:{fontSize:22,fontWeight:'900',color:'#fff'},
+  sheetSub:{fontSize:14,color:'rgba(255,255,255,0.85)',marginTop:4},
+  body:{padding:20,paddingBottom:40},
+  label:{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginBottom:12},
+  emojiRow:{flexDirection:'row',flexWrap:'wrap',gap:8},
+  emojiBtn:{width:48,height:48,borderRadius:12,backgroundColor:C.section,alignItems:'center',justifyContent:'center'},
+  noteInput:{backgroundColor:C.section,borderRadius:12,borderWidth:1.5,borderColor:C.border,padding:14,color:C.text,fontSize:15,minHeight:60},
+  btnRow:{flexDirection:'row',gap:12,marginTop:20},
+  skipBtn:{paddingHorizontal:20,paddingVertical:14,borderRadius:12,backgroundColor:C.section,justifyContent:'center'},
+  skipTxt:{color:C.textSub,fontWeight:'700'},
+  saveBtn:{borderRadius:12,padding:14,alignItems:'center'},
+  saveTxt:{color:'#fff',fontWeight:'800',fontSize:15},
+});
+
 function QuotesCard() {
   const [idx,setIdx]=useState(0);
   const tx=useRef(new Animated.Value(0)).current;
@@ -100,7 +245,7 @@ function QuotesCard() {
           Animated.timing(op,{toValue:1,duration:300,useNativeDriver:true}),
         ]).start();
       });
-    },4500);
+    },5000);
     return ()=>clearInterval(t);
   },[]);
   const q=QUOTES[idx];
@@ -118,8 +263,7 @@ function QuotesCard() {
   );
 }
 
-// ── Home Screen ───────────────────────────────────────────────────────────────
-function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,onHabitDetail}) {
+function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,setRemarks,setHabits,onAddHabit,onHabitDetail}) {
   const today=getTodayKey();
   const dayIdx=new Date().getDay();
   const hour=new Date().getHours();
@@ -129,15 +273,31 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
   const done=active.filter(h=>logs[today]?.[h.id]).length;
   const todayMood=moods[today]||null;
   const info=getLevelInfo(user.xp);
+  const pct=active.length>0?Math.round((done/active.length)*100):0;
+  const [remarkModal,setRemarkModal]=useState(false);
+  const [remarkHabit,setRemarkHabit]=useState(null);
+  const barAnim=useRef(new Animated.Value(0)).current;
 
-  const toggle=async(id)=>{
+  useEffect(()=>{
+    Animated.timing(barAnim,{toValue:info.progress,duration:900,useNativeDriver:false}).start();
+  },[user.xp]);
+
+  const toggle=async(h)=>{
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const nl={...logs};if(!nl[today])nl[today]={};
-    const was=nl[today][id];nl[today][id]=!was;
+    const was=nl[today][h.id];nl[today][h.id]=!was;
     const newXp=Math.max(0,user.xp+(was?-10:10));
     const nu={...user,xp:newXp};
     setLogs(nl);setUser(nu);
     await Store.set('logs',nl);await Store.set('user',nu);
+    if(!was){setRemarkHabit(h);setRemarkModal(true);}
+  };
+
+  const saveRemark=async(remark)=>{
+    if(!remarkHabit)return;
+    const key=`${today}_${remarkHabit.id}`;
+    const nr={...remarks,[key]:remark};
+    setRemarks(nr);await Store.set('remarks',nr);
   };
 
   const setMood=async(v)=>{
@@ -146,14 +306,12 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
     setMoods(nm);await Store.set('moods',nm);
   };
 
-  const barAnim=useRef(new Animated.Value(0)).current;
-  useEffect(()=>{Animated.timing(barAnim,{toValue:info.progress,duration:900,useNativeDriver:false}).start();},[user.xp]);
-
-  const pct=active.length>0?Math.round((done/active.length)*100):0;
+  const reorder=async(newHabits)=>{
+    setHabits(newHabits);await Store.set('habits',newHabits);
+  };
 
   return (
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:100}}>
-      {/* Header */}
       <View style={st.header}>
         <View>
           <Text style={st.greeting}>Good <Text style={{color:C.primary}}>{greeting}</Text></Text>
@@ -167,10 +325,8 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
         </TouchableOpacity>
       </View>
 
-      {/* Quotes */}
       <View style={{paddingHorizontal:16,marginBottom:16}}><QuotesCard/></View>
 
-      {/* Level */}
       <View style={{paddingHorizontal:16,marginBottom:12}}>
         <View style={st.levelStrip}>
           <View style={st.levelBadge}><Text style={st.levelNum}>{info.current.level}</Text></View>
@@ -187,7 +343,6 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
         </View>
       </View>
 
-      {/* Progress */}
       <View style={{paddingHorizontal:16,marginBottom:16}}>
         <View style={st.progressCard}>
           <View style={st.ringWrap}>
@@ -204,7 +359,6 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
         </View>
       </View>
 
-      {/* Mood */}
       <View style={{paddingHorizontal:16,marginBottom:16}}>
         <Text style={st.secTitle}>How are you feeling?</Text>
         <View style={{flexDirection:'row',gap:8,marginTop:8}}>
@@ -217,10 +371,11 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
         </View>
       </View>
 
-      {/* Habits */}
       <View style={{paddingHorizontal:16,marginBottom:8}}>
         <Text style={st.secTitle}>Today's Habits</Text>
+        <Text style={{fontSize:11,color:C.textMuted,marginTop:-6}}>Long-press icon to reorder</Text>
       </View>
+
       {habits.length===0&&(
         <TouchableOpacity onPress={onAddHabit} style={st.empty}>
           <Text style={{fontSize:52}}>🌱</Text>
@@ -228,15 +383,33 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
           <Text style={st.emptySub}>Tap + to add your first habit</Text>
         </TouchableOpacity>
       )}
-      {habits.map(h=>{
+
+      {habits.map((h,i)=>{
         const isCompleted=!!logs[today]?.[h.id];
         const isRest=!!h.restDays?.includes(dayIdx);
         const streak=getStreak(logs,h.id);
         const bg=h.color||C.palette[0];
+        const remark=remarks[`${today}_${h.id}`];
         return (
           <View key={h.id} style={{paddingHorizontal:16,marginBottom:10}}>
             <View style={[st.habitCard,{backgroundColor:bg}]}>
-              <TouchableOpacity onPress={()=>onHabitDetail(h)} style={st.habitIconWrap}>
+              <TouchableOpacity
+                onLongPress={()=>{
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                  Alert.alert('↕️ Move Habit',`Move "${h.name}" to:`,
+                    [...habits.map((_,j)=>j!==i?{
+                      text:`Position ${j+1} — ${habits[j].name}`,
+                      onPress:()=>{
+                        const arr=[...habits];
+                        const [item]=arr.splice(i,1);
+                        arr.splice(j,0,item);
+                        reorder(arr);
+                      }
+                    }:null).filter(Boolean),
+                    {text:'Cancel',style:'cancel'}]
+                  );
+                }}
+                style={st.habitIconWrap}>
                 <Text style={{fontSize:24}}>{h.icon}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>onHabitDetail(h)}>
@@ -245,9 +418,10 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
                   {streak>0&&<Text style={st.habitStreak}>🔥 {streak} day{streak>1?'s':''}</Text>}
                   {h.alarms?.length>0&&<Text style={st.habitAlarm}>⏰ {fmtAlarm(h.alarms[0])}</Text>}
                   {isRest&&<Text style={st.habitRest}>😴 Rest</Text>}
+                  {remark&&<Text style={st.habitRemark}>{remark.emoji}{remark.note?' · '+remark.note:''}</Text>}
                 </View>
               </TouchableOpacity>
-              <TouchableOpacity onPress={()=>!isRest&&toggle(h.id)} style={st.checkBtn}>
+              <TouchableOpacity onPress={()=>!isRest&&toggle(h)} style={st.checkBtn}>
                 <View style={[st.check,isCompleted&&st.checkDone]}>
                   {isCompleted&&<Text style={{fontSize:16,fontWeight:'900',color:bg}}>✓</Text>}
                 </View>
@@ -256,11 +430,19 @@ function HomeScreen({habits,logs,moods,user,setUser,setLogs,setMoods,onAddHabit,
           </View>
         );
       })}
+
+      <RemarkModal
+        visible={remarkModal}
+        habitName={remarkHabit?.name||''}
+        habitColor={remarkHabit?.color}
+        existingRemark={remarkHabit?remarks[`${today}_${remarkHabit.id}`]:null}
+        onSave={saveRemark}
+        onClose={()=>{setRemarkModal(false);setRemarkHabit(null);}}
+      />
     </ScrollView>
   );
 }
 
-// ── Add Habit Screen ──────────────────────────────────────────────────────────
 function AddHabitScreen({existing,onSave,onBack}) {
   const [name,setName]=useState(existing?.name||'');
   const [icon,setIcon]=useState(existing?.icon||'💪');
@@ -276,7 +458,7 @@ function AddHabitScreen({existing,onSave,onBack}) {
 
   const handleTime=(e,date)=>{
     setShowPicker(false);
-    if(e.type==='dismissed'||!date) return;
+    if(e.type==='dismissed'||!date)return;
     const alarm={hour:date.getHours(),minute:date.getMinutes()};
     if(editIdx!==null){const u=[...alarms];u[editIdx]=alarm;setAlarms(u);}
     else setAlarms(p=>[...p,alarm]);
@@ -286,7 +468,13 @@ function AddHabitScreen({existing,onSave,onBack}) {
   const save=async()=>{
     if(!name.trim()){Alert.alert('Required','Enter a habit name.');return;}
     setSaving(true);
-    const habit={id:existing?.id||`h_${Date.now()}`,name:name.trim(),icon,color,restDays,alarms,createdAt:existing?.createdAt||new Date().toISOString()};
+    const habit={
+      id:existing?.id||`h_${Date.now()}`,
+      name:name.trim(),icon,color,restDays,alarms,
+      createdAt:existing?.createdAt||new Date().toISOString()
+    };
+    await cancelHabitAlarms(habit.id);
+    for(const a of alarms) await scheduleAlarm(habit,a);
     const habits=await Store.get('habits',[]);
     if(existing){await Store.set('habits',habits.map(h=>h.id===existing.id?habit:h));}
     else{await Store.set('habits',[...habits,habit]);}
@@ -306,13 +494,15 @@ function AddHabitScreen({existing,onSave,onBack}) {
         <Text style={st.label}>HABIT NAME</Text>
         <View style={st.inputWrap}>
           <Text style={{fontSize:22,marginRight:8}}>{icon}</Text>
-          <TextInput style={st.input} value={name} onChangeText={setName} placeholder="e.g. Morning Run" placeholderTextColor={C.textMuted} autoFocus={!existing}/>
+          <TextInput style={st.input} value={name} onChangeText={setName}
+            placeholder="e.g. Morning Run" placeholderTextColor={C.textMuted}
+            maxLength={40} autoFocus={!existing}/>
         </View>
 
         <Text style={[st.label,{marginTop:20}]}>ICON</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:6}}>
           {ICONS.map(ic=>(
-            <TouchableOpacity key={ic} onPress={()=>setIcon(ic)}
+            <TouchableOpacity key={ic} onPress={()=>{Haptics.selectionAsync();setIcon(ic);}}
               style={[st.iconBtn,icon===ic&&{backgroundColor:color+'22',borderColor:color,borderWidth:2}]}>
               <Text style={{fontSize:22}}>{ic}</Text>
             </TouchableOpacity>
@@ -322,8 +512,9 @@ function AddHabitScreen({existing,onSave,onBack}) {
         <Text style={[st.label,{marginTop:20}]}>COLOR</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>
           {C.palette.map(c=>(
-            <TouchableOpacity key={c} onPress={()=>setColor(c)}
-              style={[{width:36,height:36,borderRadius:18,backgroundColor:c,alignItems:'center',justifyContent:'center'},color===c&&{borderWidth:3,borderColor:'#fff'}]}>
+            <TouchableOpacity key={c} onPress={()=>{Haptics.selectionAsync();setColor(c);}}
+              style={[{width:36,height:36,borderRadius:18,backgroundColor:c,alignItems:'center',justifyContent:'center'},
+                color===c&&{borderWidth:3,borderColor:'#fff'}]}>
               {color===c&&<Text style={{color:'#fff',fontWeight:'900'}}>✓</Text>}
             </TouchableOpacity>
           ))}
@@ -336,13 +527,13 @@ function AddHabitScreen({existing,onSave,onBack}) {
             <Text style={{color:'#fff',fontWeight:'700',fontSize:13}}>+ Add Alarm</Text>
           </TouchableOpacity>
         </View>
-        {alarms.length===0&&<Text style={{fontSize:13,color:C.textMuted,fontStyle:'italic'}}>No alarms yet.</Text>}
+        {alarms.length===0&&<Text style={{fontSize:13,color:C.textMuted,fontStyle:'italic'}}>No alarms. Phone rings at set times.</Text>}
         {alarms.map((a,i)=>(
           <View key={i} style={st.alarmRow}>
-            <Text style={[{flex:1,fontSize:20,fontWeight:'900'},{ color}]}>{fmtAlarm(a)}</Text>
+            <Text style={[{flex:1,fontSize:20,fontWeight:'900'},{color}]}>{fmtAlarm(a)}</Text>
             <Text style={{fontSize:11,color:C.textMuted,marginRight:8}}>Daily</Text>
             <TouchableOpacity onPress={()=>{setEditIdx(i);const d=new Date();d.setHours(a.hour,a.minute);setPickerDate(d);setShowPicker(true);}}
-              style={[st.alarmEditBtn]}>
+              style={st.alarmEditBtn}>
               <Text style={{color:C.primary,fontWeight:'700',fontSize:12}}>Edit</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={()=>setAlarms(p=>p.filter((_,j)=>j!==i))} style={st.alarmDelBtn}>
@@ -376,20 +567,23 @@ function AddHabitScreen({existing,onSave,onBack}) {
   );
 }
 
-// ── Stats Screen ──────────────────────────────────────────────────────────────
 function StatsScreen({habits,logs,moods}) {
+  const matrixRef=useRef(null);
   const totalDone=Object.values(logs).reduce((a,d)=>a+Object.values(d).filter(Boolean).length,0);
   const bestStreak=habits.reduce((b,h)=>{const s=getStreak(logs,h.id);return s>b?s:b;},0);
   const mv=Object.values(moods);
   const avgMood=mv.length>0?(mv.reduce((a,b)=>a+b,0)/mv.length).toFixed(1):'—';
 
-  // 30 day matrix
   const dayKeys=[];
   for(let i=29;i>=0;i--){
     const d=new Date();d.setDate(d.getDate()-i);
     const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     dayKeys.push({key,label:DAYS_SHORT[d.getDay()],date:d.getDate(),isToday:i===0});
   }
+
+  useEffect(()=>{
+    setTimeout(()=>matrixRef.current?.scrollToEnd({animated:false}),300);
+  },[]);
 
   return (
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:80}}>
@@ -407,13 +601,11 @@ function StatsScreen({habits,logs,moods}) {
         ))}
       </View>
 
-      {/* 30-day matrix */}
       {habits.length>0&&(
         <View style={{marginHorizontal:16,marginBottom:16,backgroundColor:C.card,borderRadius:20,padding:16}}>
           <Text style={{fontSize:15,fontWeight:'800',color:C.text}}>📅 30-Day Matrix</Text>
-          <Text style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Habit frozen left · Scroll →</Text>
+          <Text style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Today on right →</Text>
           <View style={{flexDirection:'row'}}>
-            {/* Frozen left */}
             <View style={{width:100}}>
               <View style={{height:40}}><Text style={{fontSize:10,fontWeight:'700',color:C.textMuted,textTransform:'uppercase',alignSelf:'flex-end',paddingBottom:4}}>Habit</Text></View>
               {habits.map(h=>(
@@ -423,13 +615,12 @@ function StatsScreen({habits,logs,moods}) {
                 </View>
               ))}
             </View>
-            {/* Scrollable days */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView ref={matrixRef} horizontal showsHorizontalScrollIndicator={false}>
               <View>
                 <View style={{flexDirection:'row',height:40,alignItems:'flex-end',paddingBottom:4}}>
                   {dayKeys.map(dk=>(
                     <View key={dk.key} style={[{width:36,alignItems:'center'},dk.isToday&&{backgroundColor:C.primaryPale,borderRadius:6}]}>
-                      <Text style={{fontSize:8,color:C.textMuted,fontWeight:'700'}}>{dk.label}</Text>
+                      <Text style={{fontSize:8,color:dk.isToday?C.primary:C.textMuted,fontWeight:'700'}}>{dk.label}</Text>
                       <Text style={{fontSize:11,color:dk.isToday?C.primary:C.textSub,fontWeight:dk.isToday?'900':'700'}}>{dk.date}</Text>
                     </View>
                   ))}
@@ -456,7 +647,6 @@ function StatsScreen({habits,logs,moods}) {
         </View>
       )}
 
-      {/* Breakdown */}
       <View style={{paddingHorizontal:16}}>
         <Text style={st.secTitle}>Habit Breakdown</Text>
         {habits.length===0&&<Text style={{fontSize:13,color:C.textMuted,textAlign:'center',paddingVertical:20}}>No habits yet</Text>}
@@ -465,8 +655,8 @@ function StatsScreen({habits,logs,moods}) {
           const r7=getRate(logs,h.id,7);
           const r30=getRate(logs,h.id,30);
           return (
-            <View key={h.id} style={[st.breakdownCard]}>
-              <View style={[{width:44,height:44,borderRadius:14,backgroundColor:h.color||C.primary,alignItems:'center',justifyContent:'center'}]}>
+            <View key={h.id} style={st.breakdownCard}>
+              <View style={{width:44,height:44,borderRadius:14,backgroundColor:h.color||C.primary,alignItems:'center',justifyContent:'center'}}>
                 <Text style={{fontSize:20}}>{h.icon}</Text>
               </View>
               <View style={{flex:1,marginLeft:12}}>
@@ -487,7 +677,6 @@ function StatsScreen({habits,logs,moods}) {
   );
 }
 
-// ── Goals Screen ──────────────────────────────────────────────────────────────
 function GoalsScreen({goals,setGoals}) {
   const [showAdd,setShowAdd]=useState(false);
   const [title,setTitle]=useState('');
@@ -612,7 +801,6 @@ function GoalsScreen({goals,setGoals}) {
   );
 }
 
-// ── Profile Screen ────────────────────────────────────────────────────────────
 function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMoods}) {
   const [editName,setEditName]=useState(false);
   const [tmpName,setTmpName]=useState('');
@@ -629,7 +817,11 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
     {e:'🏆',l:'Level 5',d:'Reach Level 5',ok:()=>info.current.level>=5},
     {e:'💎',l:'Diamond',d:'Earn 500 XP',ok:()=>user.xp>=500},
     {e:'😄',l:'Mood Tracker',d:'Log mood 7 days',ok:()=>{
-      for(let i=0;i<7;i++){const d=new Date();d.setDate(d.getDate()-i);const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;if(!moods[k])return false;}return true;
+      for(let i=0;i<7;i++){
+        const d=new Date();d.setDate(d.getDate()-i);
+        const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        if(!moods[k])return false;
+      }return true;
     }},
   ];
 
@@ -641,7 +833,11 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
   const reset=()=>Alert.alert('Reset All','Delete all data?',[
     {text:'Cancel',style:'cancel'},
     {text:'Reset',style:'destructive',onPress:async()=>{
-      await Promise.all([Store.set('habits',[]),Store.set('logs',{}),Store.set('moods',{}),Store.set('user',{xp:0,name:user.name})]);
+      await Promise.all([
+        Store.set('habits',[]),Store.set('logs',{}),
+        Store.set('moods',{}),Store.set('user',{xp:0,name:user.name}),
+        Store.set('remarks',{}),Store.set('goals',[]),
+      ]);
       setHabits([]);setLogs({});setMoods({});setUser({xp:0,name:user.name});
     }},
   ]);
@@ -655,10 +851,10 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
           </View>
         </View>
         {editName
-          ? <TextInput style={st.nameInput} value={tmpName} onChangeText={setTmpName} autoFocus onBlur={saveName} onSubmitEditing={saveName} maxLength={20}/>
-          : <TouchableOpacity onPress={()=>{setTmpName(user.name);setEditName(true);}}>
-              <Text style={{fontSize:22,fontWeight:'900',color:'#fff',marginBottom:8}}>{user.name} ✏️</Text>
-            </TouchableOpacity>
+          ?<TextInput style={st.nameInput} value={tmpName} onChangeText={setTmpName} autoFocus onBlur={saveName} onSubmitEditing={saveName} maxLength={20}/>
+          :<TouchableOpacity onPress={()=>{setTmpName(user.name);setEditName(true);}}>
+            <Text style={{fontSize:22,fontWeight:'900',color:'#fff',marginBottom:8}}>{user.name} ✏️</Text>
+          </TouchableOpacity>
         }
         <View style={{backgroundColor:'rgba(255,255,255,0.20)',borderRadius:99,paddingHorizontal:16,paddingVertical:6}}>
           <Text style={{color:'#fff',fontWeight:'700',fontSize:13}}>⚡ Level {info.current.level} · {info.current.title}</Text>
@@ -717,8 +913,7 @@ function ProfileScreen({user,setUser,habits,logs,moods,setHabits,setLogs,setMood
   );
 }
 
-// ── Habit Detail Screen ───────────────────────────────────────────────────────
-function HabitDetailScreen({habit,logs,onBack,onEdit,onDelete}) {
+function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}) {
   const streak=getStreak(logs,habit.id);
   const r7=getRate(logs,habit.id,7);
   const r30=getRate(logs,habit.id,30);
@@ -727,7 +922,8 @@ function HabitDetailScreen({habit,logs,onBack,onEdit,onDelete}) {
   for(let i=34;i>=0;i--){
     const d=new Date();d.setDate(d.getDate()-i);
     const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    days.push({key,date:d.getDate(),done:!!(logs[key]&&logs[key][habit.id]),isToday:i===0});
+    const remark=remarks[`${key}_${habit.id}`];
+    days.push({key,date:d.getDate(),done:!!(logs[key]&&logs[key][habit.id]),isToday:i===0,remark});
   }
   return (
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:60}}>
@@ -780,11 +976,12 @@ function HabitDetailScreen({habit,logs,onBack,onEdit,onDelete}) {
         <Text style={st.secTitle}>📅 Last 35 Days</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:5}}>
           {days.map((d,i)=>(
-            <View key={i} style={[{width:36,height:36,borderRadius:8,alignItems:'center',justifyContent:'center'},
+            <View key={i} style={[{width:38,height:46,borderRadius:8,alignItems:'center',justifyContent:'center'},
               d.done&&{backgroundColor:color},!d.done&&{backgroundColor:C.section},
               d.isToday&&{borderWidth:2,borderColor:color}]}>
               <Text style={{fontSize:10,fontWeight:'700',color:d.done?'#fff':C.textSub}}>{d.date}</Text>
               {d.done&&<Text style={{fontSize:9,color:'#fff',fontWeight:'900'}}>✓</Text>}
+              {d.remark&&<Text style={{fontSize:10}}>{d.remark.emoji}</Text>}
             </View>
           ))}
         </View>
@@ -804,33 +1001,35 @@ function HabitDetailScreen({habit,logs,onBack,onEdit,onDelete}) {
   );
 }
 
-// ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [screen,setScreen]=useState('home');
+  const [screen,setScreen]=useState('main');
   const [habits,setHabits]=useState([]);
   const [logs,setLogs]=useState({});
   const [moods,setMoods]=useState({});
   const [user,setUser]=useState({xp:0,name:'Champion'});
   const [goals,setGoals]=useState([]);
+  const [remarks,setRemarks]=useState({});
   const [editHabit,setEditHabit]=useState(null);
   const [detailHabit,setDetailHabit]=useState(null);
   const [tab,setTab]=useState('home');
 
   useEffect(()=>{
+    setupNotifications();
     Promise.all([
       Store.get('habits',[]),Store.get('logs',{}),Store.get('moods',{}),
-      Store.get('user',{xp:0,name:'Champion'}),Store.get('goals',[]),
-    ]).then(([h,l,m,u,g])=>{setHabits(h);setLogs(l);setMoods(m);setUser(u);setGoals(g);});
+      Store.get('user',{xp:0,name:'Champion'}),Store.get('goals',[]),Store.get('remarks',{}),
+    ]).then(([h,l,m,u,g,r])=>{
+      setHabits(h);setLogs(l);setMoods(m);setUser(u);setGoals(g);setRemarks(r);
+    });
   },[]);
 
-  const reloadHabits=async()=>{
-    const h=await Store.get('habits',[]);setHabits(h);
-  };
+  const reloadHabits=async()=>{const h=await Store.get('habits',[]);setHabits(h);};
 
-  const deleteHabit=async(id)=>{
+  const deleteHabit=(id)=>{
     Alert.alert('Delete','Remove this habit?',[
       {text:'Cancel',style:'cancel'},
       {text:'Delete',style:'destructive',onPress:async()=>{
+        await cancelHabitAlarms(id);
         const nh=habits.filter(h=>h.id!==id);
         setHabits(nh);await Store.set('habits',nh);
         setScreen('main');setDetailHabit(null);
@@ -840,27 +1039,32 @@ export default function App() {
 
   const renderScreen=()=>{
     if(screen==='addHabit') return (
-      <AddHabitScreen existing={editHabit} onBack={()=>{setScreen('main');setEditHabit(null);}}
+      <AddHabitScreen existing={editHabit}
+        onBack={()=>{setScreen('main');setEditHabit(null);}}
         onSave={async()=>{await reloadHabits();setScreen('main');setEditHabit(null);}}/>
     );
     if(screen==='habitDetail'&&detailHabit) return (
-      <HabitDetailScreen habit={detailHabit} logs={logs}
+      <HabitDetailScreen
+        habit={detailHabit} logs={logs} remarks={remarks}
         onBack={()=>{setScreen('main');setDetailHabit(null);}}
         onEdit={()=>{setEditHabit(detailHabit);setScreen('addHabit');}}
         onDelete={()=>deleteHabit(detailHabit.id)}/>
     );
-    // Main tabs
     return (
       <View style={{flex:1}}>
-        {tab==='home'&&<HomeScreen habits={habits} logs={logs} moods={moods} user={user}
-          setUser={setUser} setLogs={setLogs} setMoods={setMoods}
-          onAddHabit={()=>{setEditHabit(null);setScreen('addHabit');}}
-          onHabitDetail={(h)=>{setDetailHabit(h);setScreen('habitDetail');}}/>}
+        {tab==='home'&&(
+          <HomeScreen habits={habits} logs={logs} moods={moods} user={user} remarks={remarks}
+            setUser={setUser} setLogs={setLogs} setMoods={setMoods}
+            setRemarks={setRemarks} setHabits={setHabits}
+            onAddHabit={()=>{setEditHabit(null);setScreen('addHabit');}}
+            onHabitDetail={(h)=>{setDetailHabit(h);setScreen('habitDetail');}}/>
+        )}
         {tab==='stats'&&<StatsScreen habits={habits} logs={logs} moods={moods}/>}
         {tab==='goals'&&<GoalsScreen goals={goals} setGoals={setGoals}/>}
-        {tab==='profile'&&<ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods}
-          setHabits={setHabits} setLogs={setLogs} setMoods={setMoods}/>}
-        {/* Tab Bar */}
+        {tab==='profile'&&(
+          <ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods}
+            setHabits={setHabits} setLogs={setLogs} setMoods={setMoods}/>
+        )}
         <View style={st.tabBar}>
           {[{id:'home',e:'🏠',l:'Today'},{id:'stats',e:'📊',l:'Stats'},{id:'goals',e:'🎯',l:'Goals'},{id:'profile',e:'⚡',l:'Profile'}].map(t=>(
             <TouchableOpacity key={t.id} onPress={()=>setTab(t.id)} style={st.tabBtn}>
@@ -883,16 +1087,13 @@ export default function App() {
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-const st = StyleSheet.create({
-  // Header
+const st=StyleSheet.create({
   header:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',paddingHorizontal:16,paddingTop:56,paddingBottom:16},
   greeting:{fontSize:22,fontWeight:'900',color:C.text},
   dateTxt:{fontSize:13,color:C.textSub,marginTop:4},
   fab:{borderRadius:99,overflow:'hidden',elevation:6,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:4},shadowOpacity:0.2,shadowRadius:8},
   fabGrad:{width:48,height:48,borderRadius:24,alignItems:'center',justifyContent:'center'},
   fabTxt:{color:'#fff',fontSize:26,fontWeight:'700',marginTop:-2},
-  // Quote
   quoteCard:{borderRadius:20,padding:16,minHeight:110,justifyContent:'space-between',elevation:6,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:4},shadowOpacity:0.15,shadowRadius:12},
   quoteDecor:{fontSize:40,color:'rgba(255,255,255,0.25)',position:'absolute',top:4,left:12},
   quoteText:{fontSize:14,color:'#fff',fontWeight:'600',lineHeight:21,paddingTop:8},
@@ -900,7 +1101,6 @@ const st = StyleSheet.create({
   quoteDots:{flexDirection:'row',gap:4,marginTop:8},
   dot:{width:5,height:5,borderRadius:3,backgroundColor:'rgba(255,255,255,0.35)'},
   dotActive:{width:14,backgroundColor:'#fff'},
-  // Level
   levelStrip:{backgroundColor:C.card,borderRadius:16,padding:16,flexDirection:'row',alignItems:'center',elevation:3,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:8},
   levelBadge:{width:40,height:40,borderRadius:20,backgroundColor:C.primary,alignItems:'center',justifyContent:'center'},
   levelNum:{color:'#fff',fontSize:18,fontWeight:'900'},
@@ -909,7 +1109,6 @@ const st = StyleSheet.create({
   barBg:{height:8,backgroundColor:C.section,borderRadius:99,overflow:'hidden',marginVertical:4},
   barFill:{height:'100%',backgroundColor:C.primary,borderRadius:99},
   levelNext:{fontSize:10,color:C.textMuted},
-  // Progress
   progressCard:{backgroundColor:C.card,borderRadius:20,padding:16,flexDirection:'row',alignItems:'center',gap:16,elevation:3,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:8},
   ringWrap:{width:80,height:80,alignItems:'center',justifyContent:'center'},
   ring:{width:80,height:80,borderRadius:40,borderWidth:7,alignItems:'center',justifyContent:'center'},
@@ -919,59 +1118,49 @@ const st = StyleSheet.create({
   progressSub:{fontSize:13,color:C.textSub,marginTop:2},
   allDone:{backgroundColor:C.successPale,borderRadius:99,paddingHorizontal:10,paddingVertical:4,marginTop:6,alignSelf:'flex-start'},
   allDoneTxt:{fontSize:12,color:C.success,fontWeight:'700'},
-  // Mood
-  moodBtn:{flex:1,alignItems:'center',paddingVertical:10,backgroundColor:C.card,borderRadius:14,borderWidth:1.5,borderColor:C.border,elevation:2,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:1},shadowOpacity:0.06,shadowRadius:4},
-  // Habit card
+  moodBtn:{flex:1,alignItems:'center',paddingVertical:10,backgroundColor:C.card,borderRadius:14,borderWidth:1.5,borderColor:C.border,elevation:2},
   habitCard:{flexDirection:'row',alignItems:'center',borderRadius:20,padding:14,elevation:5,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:4},shadowOpacity:0.12,shadowRadius:12},
   habitIconWrap:{width:46,height:46,borderRadius:14,backgroundColor:'rgba(255,255,255,0.25)',alignItems:'center',justifyContent:'center'},
   habitName:{fontSize:15,fontWeight:'800',color:'#fff'},
   habitStreak:{fontSize:11,color:'rgba(255,255,255,0.85)',fontWeight:'700'},
   habitAlarm:{fontSize:11,color:'rgba(255,255,255,0.80)',fontWeight:'600'},
   habitRest:{fontSize:11,color:'rgba(255,255,255,0.70)'},
+  habitRemark:{fontSize:11,color:'rgba(255,255,255,0.90)',fontWeight:'600'},
   checkBtn:{marginLeft:10},
   check:{width:32,height:32,borderRadius:16,borderWidth:2.5,borderColor:'rgba(255,255,255,0.6)',alignItems:'center',justifyContent:'center'},
   checkDone:{backgroundColor:'rgba(255,255,255,0.9)',borderColor:'transparent'},
-  // Empty
   empty:{alignItems:'center',paddingVertical:60},
   emptyTitle:{fontSize:20,fontWeight:'800',color:C.text,marginBottom:4,marginTop:12},
   emptySub:{fontSize:14,color:C.textSub},
-  // Screen headers
   screenHeader:{paddingHorizontal:16,paddingTop:56,paddingBottom:30,borderBottomLeftRadius:28,borderBottomRightRadius:28,marginBottom:16},
   screenHeaderTitle:{fontSize:28,fontWeight:'900',color:'#fff'},
   screenHeaderSub:{fontSize:14,color:'rgba(255,255,255,0.75)',marginTop:4},
   headerAddBtn:{alignSelf:'flex-start',marginTop:12,backgroundColor:'rgba(255,255,255,0.25)',borderRadius:99,paddingHorizontal:16,paddingVertical:8},
-  // Modal header
   modalHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingTop:56,paddingBottom:16},
   modalTitle:{fontSize:18,fontWeight:'900',color:'#fff'},
   closeBtn:{width:36,height:36,borderRadius:18,backgroundColor:'rgba(255,255,255,0.2)',alignItems:'center',justifyContent:'center'},
   closeTxt:{color:'#fff',fontSize:16,fontWeight:'700'},
   saveHdrBtn:{backgroundColor:'rgba(255,255,255,0.25)',paddingHorizontal:16,paddingVertical:8,borderRadius:99},
   saveHdrTxt:{color:'#fff',fontWeight:'800',fontSize:14},
-  // Inputs
   label:{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginBottom:8},
-  inputWrap:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:12,borderWidth:1.5,borderColor:C.border,paddingHorizontal:16,elevation:2,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:1},shadowOpacity:0.06,shadowRadius:4},
+  inputWrap:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:12,borderWidth:1.5,borderColor:C.border,paddingHorizontal:16,elevation:2},
   input:{flex:1,color:C.text,fontSize:16,paddingVertical:14,fontWeight:'600'},
   inputFull:{backgroundColor:C.section,borderRadius:12,borderWidth:1.5,borderColor:C.border,padding:14,color:C.text,fontSize:15,marginBottom:10,fontWeight:'500'},
   iconBtn:{width:48,height:48,borderRadius:12,alignItems:'center',justifyContent:'center',backgroundColor:C.card,borderWidth:1.5,borderColor:C.border},
   addAlarmBtn:{paddingHorizontal:14,paddingVertical:8,borderRadius:99},
-  alarmRow:{flexDirection:'row',alignItems:'center',gap:8,backgroundColor:C.card,borderRadius:12,padding:14,marginTop:8,elevation:2,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:1},shadowOpacity:0.06,shadowRadius:4},
+  alarmRow:{flexDirection:'row',alignItems:'center',gap:8,backgroundColor:C.card,borderRadius:12,padding:14,marginTop:8,elevation:2},
   alarmEditBtn:{backgroundColor:C.section,paddingHorizontal:10,paddingVertical:4,borderRadius:8},
   alarmDelBtn:{backgroundColor:C.dangerPale,paddingHorizontal:10,paddingVertical:4,borderRadius:8},
   dayBtn:{flex:1,alignItems:'center',paddingVertical:10,backgroundColor:C.card,borderRadius:12,borderWidth:1.5,borderColor:C.border},
-  // Stats
-  overviewCard:{flex:1,borderRadius:20,padding:14,alignItems:'center',elevation:3,shadowColor:'#000',shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:8},
-  breakdownCard:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:20,padding:14,marginBottom:10,elevation:3,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:8},
-  // Goals
-  goalCard:{backgroundColor:C.card,borderRadius:20,padding:16,marginBottom:12,elevation:3,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:8,borderWidth:1.5,borderColor:C.border},
-  // Profile
+  overviewCard:{flex:1,borderRadius:20,padding:14,alignItems:'center',elevation:3},
+  breakdownCard:{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:20,padding:14,marginBottom:10,elevation:3},
+  goalCard:{backgroundColor:C.card,borderRadius:20,padding:16,marginBottom:12,elevation:3,borderWidth:1.5,borderColor:C.border},
   nameInput:{backgroundColor:'rgba(255,255,255,0.25)',borderRadius:12,padding:10,color:'#fff',fontSize:20,fontWeight:'700',textAlign:'center',minWidth:160,marginBottom:10},
-  statCard:{flex:1,backgroundColor:C.card,borderRadius:14,padding:10,alignItems:'center',elevation:3,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:8},
-  // Tab bar
-  tabBar:{flexDirection:'row',backgroundColor:C.card,borderTopWidth:1,borderTopColor:C.border,paddingBottom:Platform.OS==='ios'?24:8,paddingTop:8,elevation:8,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:-2},shadowOpacity:0.08,shadowRadius:8},
+  statCard:{flex:1,backgroundColor:C.card,borderRadius:14,padding:10,alignItems:'center',elevation:3},
+  tabBar:{flexDirection:'row',backgroundColor:C.card,borderTopWidth:1,borderTopColor:C.border,paddingBottom:Platform.OS==='ios'?24:8,paddingTop:8,elevation:8},
   tabBtn:{flex:1,alignItems:'center'},
   tabInner:{alignItems:'center',justifyContent:'center',paddingHorizontal:12,paddingVertical:6,borderRadius:20},
   tabInnerActive:{backgroundColor:C.primaryPale,flexDirection:'row',gap:6},
   tabLabel:{fontSize:12,color:C.primary,fontWeight:'700'},
-  // Section
   secTitle:{fontSize:16,fontWeight:'800',color:C.text,marginBottom:10},
 });
