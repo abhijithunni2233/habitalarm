@@ -34,14 +34,8 @@ jobs:
 
       - name: Patch expo-modules-core gradle
         run: |
-          GRADLE_FILE="node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle"
-          if [ -f "$GRADLE_FILE" ]; then
-            sed -i '/java {/,/}/d' "$GRADLE_FILE" || true
-            sed -i '/toolchain/d' "$GRADLE_FILE" || true
-            sed -i '/JavaLanguageVersion/d' "$GRADLE_FILE" || true
-          fi
-          find node_modules -name "*.gradle" | xargs grep -l "toolchain" | while read f; do
-            sed -i '/java {/,/}/{ /toolchain/,/}/d }' "$f" || true
+          find node_modules -name "ExpoModulesCorePlugin.gradle" | while read f; do
+            sed -i 's/components.release/components.getByName("release")/g' "$f" || true
           done
 
       - name: Fix Android colors
@@ -60,14 +54,31 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build Debug APK
+      - name: Bundle JS
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res \
+            --reset-cache 2>&1 || \
+          npx expo export:embed \
+            --platform android \
+            --entry-file node_modules/expo/AppEntry.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res 2>&1 || true
+
+      - name: Build Release APK
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon \
+            -x bundleReleaseJsAndAssets
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: HabitAlarm-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
