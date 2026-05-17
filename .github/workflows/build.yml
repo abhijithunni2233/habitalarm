@@ -32,10 +32,6 @@ jobs:
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
 
-      - name: Test JS bundle
-        run: |
-          npx expo export --platform android 2>&1 | tail -50
-
       - name: Fix Android colors
         run: |
           cat > android/app/src/main/res/values/colors.xml << 'XMLEOF'
@@ -49,17 +45,22 @@ jobs:
           </resources>
           XMLEOF
 
+      - name: Fix Gradle version
+        run: |
+          sed -i 's/classpath("com.android.tools.build:gradle:[^"]*")/classpath("com.android.tools.build:gradle:7.4.2")/' android/build.gradle
+          sed -i 's/distributionUrl=.*/distributionUrl=https\\:\/\/services.gradle.org\/distributions\/gradle-7.6.4-all.zip/' android/gradle/wrapper/gradle-wrapper.properties
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build Release APK
+      - name: Build Debug APK
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: HabitAlarm-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
