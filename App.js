@@ -1342,3 +1342,222 @@ const st=StyleSheet.create({
   tabLabel:{fontSize:12,color:C.primary,fontWeight:'700'},
   secTitle:{fontSize:16,fontWeight:'800',color:C.text,marginBottom:10},
 });
+
+// ── Onboarding Screen ─────────────────────────────────────────────────────────
+function OnboardingScreen({onDone}) {
+  const [page, setPage] = useState(0);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+
+  const slides = [
+    {
+      emoji: '🏆',
+      title: 'Build Amazing Habits',
+      desc: 'Track your daily habits, build streaks and level up your life one day at a time.',
+      color: '#6C3CE1',
+    },
+    {
+      emoji: '⏰',
+      title: 'Never Miss a Day',
+      desc: 'Set alarms for each habit. Your phone reminds you at the exact time every day.',
+      color: '#FF6B9D',
+    },
+    {
+      emoji: '📊',
+      title: 'See Your Progress',
+      desc: 'Track streaks, view 30-day history, earn XP and unlock badges as you grow.',
+      color: '#06D6A0',
+    },
+  ];
+
+  const next = () => {
+    if (page === slides.length - 1) { onDone(); return; }
+    Animated.timing(slideAnim, {toValue: -width, duration: 300, useNativeDriver: true}).start(() => {
+      slideAnim.setValue(width);
+      setPage(p => p + 1);
+      Animated.spring(slideAnim, {toValue: 0, useNativeDriver: true, tension: 100, friction: 8}).start();
+    });
+  };
+
+  const s = slides[page];
+
+  return (
+    <View style={{flex:1, backgroundColor: s.color}}>
+      <StatusBar style="light"/>
+      {/* Skip */}
+      <TouchableOpacity onPress={onDone} style={{position:'absolute',top:56,right:20,zIndex:10,backgroundColor:'rgba(255,255,255,0.2)',borderRadius:99,paddingHorizontal:14,paddingVertical:6}}>
+        <Text style={{color:'#fff',fontWeight:'700',fontSize:13}}>Skip</Text>
+      </TouchableOpacity>
+
+      <Animated.View style={{flex:1, alignItems:'center', justifyContent:'center', paddingHorizontal:32, transform:[{translateX:slideAnim}]}}>
+        <Text style={{fontSize:100, marginBottom:32}}>{s.emoji}</Text>
+        <Text style={{fontSize:28, fontWeight:'900', color:'#fff', textAlign:'center', marginBottom:16}}>{s.title}</Text>
+        <Text style={{fontSize:16, color:'rgba(255,255,255,0.85)', textAlign:'center', lineHeight:24}}>{s.desc}</Text>
+      </Animated.View>
+
+      {/* Dots */}
+      <View style={{flexDirection:'row', justifyContent:'center', gap:8, marginBottom:32}}>
+        {slides.map((_,i) => (
+          <View key={i} style={{width: i===page?24:8, height:8, borderRadius:4, backgroundColor: i===page?'#fff':'rgba(255,255,255,0.4)'}}/>
+        ))}
+      </View>
+
+      {/* Button */}
+      <TouchableOpacity onPress={next} style={{marginHorizontal:32, marginBottom:48, backgroundColor:'rgba(255,255,255,0.25)', borderRadius:16, padding:18, alignItems:'center', borderWidth:1.5, borderColor:'rgba(255,255,255,0.5)'}}>
+        <Text style={{color:'#fff', fontWeight:'900', fontSize:16}}>
+          {page === slides.length-1 ? "Let's Start! 🚀" : 'Next →'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ── Monthly Calendar Screen ────────────────────────────────────────────────────
+function MonthlyCalendarScreen({habits, logs, onBack}) {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+
+  const monthName = MONTHS[month];
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const today = getTodayKey();
+
+  const prevMonth = () => {
+    if(month === 0) {setMonth(11); setYear(y=>y-1);}
+    else setMonth(m=>m-1);
+  };
+  const nextMonth = () => {
+    if(month === 11) {setMonth(0); setYear(y=>y+1);}
+    else setMonth(m=>m+1);
+  };
+
+  const getDayKey = (day) => `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+
+  const getDayStatus = (day) => {
+    const key = getDayKey(day);
+    const dayLogs = logs[key] || {};
+    const total = habits.length;
+    if(total === 0) return 'none';
+    const done = habits.filter(h => dayLogs[h.id]).length;
+    if(done === 0) return 'none';
+    if(done === total) return 'perfect';
+    return 'partial';
+  };
+
+  const cells = [];
+  for(let i=0; i<firstDay; i++) cells.push(null);
+  for(let d=1; d<=daysInMonth; d++) cells.push(d);
+
+  return (
+    <View style={{flex:1, backgroundColor:C.bg}}>
+      <LinearGradient colors={[C.primary, C.primaryLight]} style={st.screenHeader} start={{x:0,y:0}} end={{x:1,y:1}}>
+        <TouchableOpacity onPress={onBack} style={{marginBottom:12}}>
+          <Text style={{color:'rgba(255,255,255,0.9)', fontWeight:'700', fontSize:15}}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={st.screenHeaderTitle}>📆 Monthly Calendar</Text>
+        <View style={{flexDirection:'row', alignItems:'center', gap:16, marginTop:8}}>
+          <TouchableOpacity onPress={prevMonth} style={{backgroundColor:'rgba(255,255,255,0.2)', borderRadius:99, width:32, height:32, alignItems:'center', justifyContent:'center'}}>
+            <Text style={{color:'#fff', fontWeight:'900', fontSize:16}}>‹</Text>
+          </TouchableOpacity>
+          <Text style={{color:'#fff', fontWeight:'800', fontSize:16, flex:1, textAlign:'center'}}>{monthName} {year}</Text>
+          <TouchableOpacity onPress={nextMonth} style={{backgroundColor:'rgba(255,255,255,0.2)', borderRadius:99, width:32, height:32, alignItems:'center', justifyContent:'center'}}>
+            <Text style={{color:'#fff', fontWeight:'900', fontSize:16}}>›</Text>
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
+
+      <ScrollView contentContainerStyle={{padding:16, paddingBottom:60}}>
+        {/* Legend */}
+        <View style={{flexDirection:'row', gap:16, marginBottom:16, justifyContent:'center'}}>
+          {[{c:C.success,l:'Perfect day'},{c:C.gold,l:'Partial'},{c:C.section,l:'None'}].map((x,i)=>(
+            <View key={i} style={{flexDirection:'row', alignItems:'center', gap:6}}>
+              <View style={{width:14, height:14, borderRadius:4, backgroundColor:x.c}}/>
+              <Text style={{fontSize:11, color:C.textSub, fontWeight:'600'}}>{x.l}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Day headers */}
+        <View style={{flexDirection:'row', marginBottom:8}}>
+          {DAYS_SHORT.map(d=>(
+            <Text key={d} style={{flex:1, textAlign:'center', fontSize:11, fontWeight:'800', color:C.textMuted}}>{d}</Text>
+          ))}
+        </View>
+
+        {/* Calendar grid */}
+        <View style={{flexDirection:'row', flexWrap:'wrap'}}>
+          {cells.map((day, i) => {
+            if(!day) return <View key={`e${i}`} style={{width:`${100/7}%`, aspectRatio:1}}/>;
+            const key = getDayKey(day);
+            const status = getDayStatus(day);
+            const isToday = key === today;
+            const isFuture = new Date(year, month, day) > new Date();
+            const bg = status==='perfect'?C.success:status==='partial'?C.gold:C.section;
+            return (
+              <View key={day} style={{width:`${100/7}%`, aspectRatio:1, padding:2}}>
+                <View style={[{flex:1, borderRadius:8, alignItems:'center', justifyContent:'center', backgroundColor: isFuture?'transparent':bg}, isToday&&{borderWidth:2, borderColor:C.primary}]}>
+                  <Text style={{fontSize:12, fontWeight: isToday?'900':'700', color: status!=='none'&&!isFuture?'#fff':C.textSub}}>{day}</Text>
+                  {status==='perfect'&&!isFuture&&<Text style={{fontSize:8}}>⭐</Text>}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Monthly stats */}
+        <View style={{marginTop:20, backgroundColor:C.card, borderRadius:20, padding:16}}>
+          <Text style={{fontSize:15, fontWeight:'800', color:C.text, marginBottom:12}}>Month Summary</Text>
+          {(() => {
+            let perfect=0, partial=0, missed=0;
+            for(let d=1; d<=daysInMonth; d++) {
+              const s = getDayStatus(d);
+              const isFuture = new Date(year,month,d) > new Date();
+              if(!isFuture) {
+                if(s==='perfect') perfect++;
+                else if(s==='partial') partial++;
+                else missed++;
+              }
+            }
+            return (
+              <View style={{flexDirection:'row', gap:10}}>
+                {[{v:perfect,l:'Perfect',c:C.success},{v:partial,l:'Partial',c:C.gold},{v:missed,l:'Missed',c:C.danger}].map((x,i)=>(
+                  <View key={i} style={{flex:1, backgroundColor:x.c+'20', borderRadius:12, padding:12, alignItems:'center'}}>
+                    <Text style={{fontSize:22, fontWeight:'900', color:x.c}}>{x.v}</Text>
+                    <Text style={{fontSize:11, color:x.c, fontWeight:'700'}}>{x.l}</Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+// ── 7-Day Date Selector (add to Home) ────────────────────────────────────────
+function DateSelector({selectedDate, onSelectDate}) {
+  const dates = [];
+  for(let i=6; i>=0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    dates.push({key, day: DAYS_SHORT[d.getDay()], date: d.getDate(), isToday: i===0});
+  }
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{paddingHorizontal:16, marginBottom:16}}>
+      <View style={{flexDirection:'row', gap:8}}>
+        {dates.map(d=>(
+          <TouchableOpacity key={d.key} onPress={()=>onSelectDate(d.key)}
+            style={[{width:52, paddingVertical:10, borderRadius:14, alignItems:'center', backgroundColor:C.card, borderWidth:1.5, borderColor:C.border},
+              selectedDate===d.key&&{backgroundColor:C.primary, borderColor:C.primary},
+              d.isToday&&selectedDate!==d.key&&{borderColor:C.primary}]}>
+            <Text style={{fontSize:10, fontWeight:'700', color:selectedDate===d.key?'#fff':C.textMuted}}>{d.day}</Text>
+            <Text style={{fontSize:18, fontWeight:'900', color:selectedDate===d.key?'#fff':C.text, marginTop:2}}>{d.date}</Text>
+            {d.isToday&&<Text style={{fontSize:8, color:selectedDate===d.key?'rgba(255,255,255,0.8)':C.primary, fontWeight:'700'}}>TODAY</Text>}
+          </TouchableOpacity>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
