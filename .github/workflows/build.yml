@@ -24,13 +24,25 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '11'
+          java-version: '17'
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
+
+      - name: Patch expo-modules-core gradle
+        run: |
+          GRADLE_FILE="node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle"
+          if [ -f "$GRADLE_FILE" ]; then
+            sed -i '/java {/,/}/d' "$GRADLE_FILE" || true
+            sed -i '/toolchain/d' "$GRADLE_FILE" || true
+            sed -i '/JavaLanguageVersion/d' "$GRADLE_FILE" || true
+          fi
+          find node_modules -name "*.gradle" | xargs grep -l "toolchain" | while read f; do
+            sed -i '/java {/,/}/{ /toolchain/,/}/d }' "$f" || true
+          done
 
       - name: Fix Android colors
         run: |
@@ -44,17 +56,6 @@ jobs:
             <color name="iconBackground">#6C3CE1</color>
           </resources>
           XMLEOF
-
-      - name: Fix Gradle to 7.6
-        run: |
-          cat > android/gradle/wrapper/gradle-wrapper.properties << 'PROPS'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.4-all.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          PROPS
-          sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:7.4.2/" android/build.gradle
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
