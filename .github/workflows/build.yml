@@ -51,30 +51,21 @@ jobs:
           </resources>
           XMLEOF
 
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-
-      - name: Bundle JS
+      - name: Bundle JS manually
         run: |
           mkdir -p android/app/src/main/assets
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --entry-file index.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res \
-            --reset-cache 2>&1 || \
-          npx expo export:embed \
-            --platform android \
-            --entry-file node_modules/expo/AppEntry.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res 2>&1 || true
+          npx expo export --platform android --output-dir /tmp/expobundle 2>&1
+          cp /tmp/expobundle/android/index.android.bundle android/app/src/main/assets/ 2>/dev/null || true
+          cp -r /tmp/expobundle/android/drawable* android/app/src/main/res/ 2>/dev/null || true
+          cp -r /tmp/expobundle/android/raw* android/app/src/main/res/ 2>/dev/null || true
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
 
       - name: Build Release APK
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon \
-            -x bundleReleaseJsAndAssets
+          SKIP_BUNDLING=1 ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
