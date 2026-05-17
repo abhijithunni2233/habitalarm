@@ -45,10 +45,18 @@ jobs:
           </resources>
           XMLEOF
 
-      - name: Fix Gradle version
+      - name: Fix Gradle wrapper
         run: |
-          sed -i 's/classpath("com.android.tools.build:gradle:[^"]*")/classpath("com.android.tools.build:gradle:7.4.2")/' android/build.gradle
-          sed -i 's/distributionUrl=.*/distributionUrl=https\\:\/\/services.gradle.org\/distributions\/gradle-7.6.4-all.zip/' android/gradle/wrapper/gradle-wrapper.properties
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.8-all.zip" > android/gradle/wrapper/gradle-wrapper.properties
+          echo "distributionBase=GRADLE_USER_HOME" >> android/gradle/wrapper/gradle-wrapper.properties
+          echo "distributionPath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
+          echo "zipStoreBase=GRADLE_USER_HOME" >> android/gradle/wrapper/gradle-wrapper.properties
+          echo "zipStorePath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Remove toolchain from build.gradle
+        run: |
+          sed -i '/toolchain/d' android/build.gradle || true
+          sed -i '/JavaLanguageVersion/d' android/build.gradle || true
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
