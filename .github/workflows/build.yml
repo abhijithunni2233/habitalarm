@@ -24,7 +24,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '11'
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
@@ -45,18 +45,16 @@ jobs:
           </resources>
           XMLEOF
 
-      - name: Fix Gradle wrapper
+      - name: Fix Gradle to 7.6
         run: |
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.8-all.zip" > android/gradle/wrapper/gradle-wrapper.properties
-          echo "distributionBase=GRADLE_USER_HOME" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "distributionPath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "zipStoreBase=GRADLE_USER_HOME" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "zipStorePath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
-
-      - name: Remove toolchain from build.gradle
-        run: |
-          sed -i '/toolchain/d' android/build.gradle || true
-          sed -i '/JavaLanguageVersion/d' android/build.gradle || true
+          cat > android/gradle/wrapper/gradle-wrapper.properties << 'PROPS'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.4-all.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          PROPS
+          sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:7.4.2/" android/build.gradle
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
