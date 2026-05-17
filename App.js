@@ -11,7 +11,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import { Audio } from 'expo-av';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -64,7 +64,7 @@ async function cancelHabitAlarms(habitId) {
 
 async function playTick() {
   try {
-    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+    
     const { sound } = await Audio.Sound.createAsync(
       require('./assets/tick.mp3'), { shouldPlay: true, volume: 0.6 }
     );
@@ -74,7 +74,7 @@ async function playTick() {
 
 async function playApplause() {
   try {
-    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+    
     const { sound } = await Audio.Sound.createAsync(
       require('./assets/applause.mp3'), { shouldPlay: true, volume: 0.8 }
     );
