@@ -167,22 +167,26 @@ export default function HomeScreen({navigation}) {
       <View style={{paddingHorizontal:SPACING.md,marginBottom:SPACING.md}}><QuotesCard/></View>
       <View style={{paddingHorizontal:SPACING.md,marginBottom:SPACING.sm}}><LevelStrip xp={user.xp}/></View>
       <View style={s.progressCard}>
-        <View style={{width:80,height:80,alignItems:'center',justifyContent:'center'}}>
+        <View style={{width:80,height:80}}>
           {(() => {
             const pct = activeHabits.length>0?completedCount/activeHabits.length:0;
             const color = completedCount===activeHabits.length&&activeHabits.length>0?COLORS.success:COLORS.primary;
-            const R=33, C=2*Math.PI*R, dash=C*pct;
+            const R=33;
+            const circumference=2*Math.PI*R;
+            const strokeDash=pct*circumference;
+            const strokeGap=circumference-strokeDash;
             return (
-              <Svg width={80} height={80} style={{position:'absolute',top:0,left:0}}>
+              <Svg width={80} height={80}>
                 <Circle cx={40} cy={40} r={R} stroke="#e0d9f7" strokeWidth={7} fill="none"/>
                 <Circle cx={40} cy={40} r={R} stroke={color} strokeWidth={7} fill="none"
-                  strokeDasharray={`${dash} ${C}`}
+                  strokeDasharray={[strokeDash, strokeGap]}
                   strokeLinecap="round"
-                  transform="rotate(-90 40 40)"/>
+                  rotation={-90}
+                  origin="40,40"/>
               </Svg>
             );
           })()}
-          <View style={s.ringInner}>
+          <View style={{position:'absolute',top:0,left:0,width:80,height:80,alignItems:'center',justifyContent:'center'}}>
             <Text style={s.ringPct}>{activeHabits.length>0?Math.round((completedCount/activeHabits.length)*100):0}%</Text>
             <Text style={s.ringLabel}>done</Text>
           </View>
