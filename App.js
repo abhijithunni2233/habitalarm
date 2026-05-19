@@ -753,7 +753,7 @@ const st=StyleSheet.create({
   levelNext:{fontSize:10,color:C.textMuted},
   progressCard:{backgroundColor:C.card,borderRadius:20,padding:16,flexDirection:'row',alignItems:'center',gap:16,elevation:3,shadowColor:'#6C3CE1',shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:8},
   ringWrap:{width:80,height:80,alignItems:'center',justifyContent:'center'},
-  ring:{width:80,height:80,borderRadius:40,borderWidth:7,borderColor:C.border,alignItems:'center',justifyContent:'center'},
+  ring:{width:80,height:80,borderRadius:40,borderWidth:7,borderColor:'#E2DCF8',alignItems:'center',justifyContent:'center'},
   ringPct:{fontSize:18,fontWeight:'900'},
   ringLbl:{fontSize:9,color:C.textSub,fontWeight:'600'},
   progressTitle:{fontSize:16,fontWeight:'800',color:C.text},
