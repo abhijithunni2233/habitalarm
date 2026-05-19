@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, FlatList } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, RADIUS, SHADOW, MOTIVATIONAL_QUOTES, getLevelInfo, XP_PER_HABIT } from '../utils/theme';
 import { Storage, getTodayKey, getStreakCount } from '../utils/storage';
@@ -167,12 +168,23 @@ export default function HomeScreen({navigation}) {
       <View style={{paddingHorizontal:SPACING.md,marginBottom:SPACING.sm}}><LevelStrip xp={user.xp}/></View>
       <View style={s.progressCard}>
         <View style={s.ringWrap}>
-          <View style={s.ring}>
-            <View style={[s.ringArc,{borderColor:completedCount===activeHabits.length&&activeHabits.length>0?COLORS.success:COLORS.primary}]}/>
-            <View style={s.ringInner}>
-              <Text style={s.ringPct}>{activeHabits.length>0?Math.round((completedCount/activeHabits.length)*100):0}%</Text>
-              <Text style={s.ringLabel}>done</Text>
-            </View>
+          {(() => {
+            const pct = activeHabits.length>0?completedCount/activeHabits.length:0;
+            const color = completedCount===activeHabits.length&&activeHabits.length>0?COLORS.success:COLORS.primary;
+            const R=33, C=2*Math.PI*R, dash=C*pct;
+            return (
+              <Svg width={80} height={80} style={{position:'absolute'}}>
+                <Circle cx={40} cy={40} r={R} stroke={COLORS.border} strokeWidth={7} fill="none"/>
+                <Circle cx={40} cy={40} r={R} stroke={color} strokeWidth={7} fill="none"
+                  strokeDasharray={`${dash} ${C}`}
+                  strokeLinecap="round"
+                  transform="rotate(-90 40 40)"/>
+              </Svg>
+            );
+          })()}
+          <View style={s.ringInner}>
+            <Text style={s.ringPct}>{activeHabits.length>0?Math.round((completedCount/activeHabits.length)*100):0}%</Text>
+            <Text style={s.ringLabel}>done</Text>
           </View>
         </View>
         <View style={s.progressInfo}>
@@ -245,7 +257,7 @@ const s = StyleSheet.create({
   levelBarFill:{height:'100%',backgroundColor:COLORS.primary,borderRadius:RADIUS.full},
   levelNext:{fontSize:10,color:COLORS.textMuted},
   progressCard:{marginHorizontal:SPACING.md,marginBottom:SPACING.md,backgroundColor:COLORS.bgCard,borderRadius:RADIUS.xl,padding:SPACING.md,flexDirection:'row',alignItems:'center',gap:SPACING.md,...SHADOW.sm},
-  ringWrap:{width:80,height:80,alignItems:'center',justifyContent:'center'},
+  ringWrap:{width:80,height:80,alignItems:'center',justifyContent:'center',position:'relative'},
   ring:{width:80,height:80,borderRadius:40,borderWidth:7,borderColor:COLORS.border,alignItems:'center',justifyContent:'center',position:'relative'},
   ringArc:{position:'absolute',width:80,height:80,borderRadius:40,borderWidth:7,borderLeftColor:'transparent',borderBottomColor:'transparent'},
   ringInner:{alignItems:'center'},
