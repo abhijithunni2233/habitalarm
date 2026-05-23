@@ -360,79 +360,291 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
     </Animated.View>
   );
 }
-function AddHabitScreen({existing,onSave,onBack}){
-  const [name,setName]=useState(existing?.name||'');
-  const [icon,setIcon]=useState(existing?.icon||'💪');
-  const [color,setColor]=useState(existing?.color||C.palette[0]);
-  const [restDays,setRestDays]=useState(existing?.restDays||[]);
-  const [alarms,setAlarms]=useState(existing?.alarms||[]);
-  const [duration,setDuration]=useState(existing?.duration?String(existing.duration):'');
-  const [showPicker,setShowPicker]=useState(false);
-  const [editIdx,setEditIdx]=useState(null);
-  const [pickerDate,setPickerDate]=useState(new Date());
-  const [saving,setSaving]=useState(false);
+function AddHabitScreen({existing, onSave, onBack}) {
+  const [step, setStep] = useState(1);
+  const [habitType, setHabitType] = useState(existing?.habitType || 'checkmark');
+  const [habitDirection, setHabitDirection] = useState(existing?.habitDirection || 'build');
+  const [name, setName] = useState(existing?.name || '');
+  const [icon, setIcon] = useState(existing?.icon || '💪');
+  const [color, setColor] = useState(existing?.color || C.palette[0]);
+  const [unit, setUnit] = useState(existing?.unit || 'km');
+  const [customUnit, setCustomUnit] = useState(existing?.customUnit || '');
+  const [dailyTarget, setDailyTarget] = useState(existing?.dailyTarget ? String(existing.dailyTarget) : '');
+  const [categories, setCategories] = useState(existing?.categories || []);
+  const [reminderOn, setReminderOn] = useState(existing?.alarms?.length > 0);
+  const [alarms, setAlarms] = useState(existing?.alarms || [{hour:9,minute:0}]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerDate, setPickerDate] = useState(new Date());
+  const [saving, setSaving] = useState(false);
+
+  const HABIT_TYPES = [
+    {id:'checkmark', label:'Checkmark', sub:'Track yes or no per day', icon:'✅'},
+    {id:'measurable', label:'Measurable', sub:'Track numbers, distance, or time', icon:'📊'},
+  ];
+  const HABIT_DIRECTIONS = [
+    {id:'build', label:'Build a Habit', icon:'📈', desc:'Add a new positive routine. Daily completions build your streak.'},
+    {id:'quit', label:'Quit a Habit', icon:'🚫', desc:'Break a bad habit. Track the days you successfully avoid it.'},
+  ];
+  const UNITS = ['hr','min','km','mi','pages','glasses','reps','kcal','words','$','Custom…'];
+  const CATEGORIES = [
+    {id:'art',label:'Art',icon:'🎨'},{id:'finances',label:'Finances',icon:'💵'},
+    {id:'fitness',label:'Fitness',icon:'🏋️'},{id:'health',label:'Health',icon:'❤️'},
+    {id:'nutrition',label:'Nutrition',icon:'🍽️'},{id:'social',label:'Social',icon:'👥'},
+    {id:'study',label:'Study',icon:'🎓'},{id:'work',label:'Work',icon:'💼'},
+    {id:'morning',label:'Morning',icon:'☀️'},{id:'day',label:'Day',icon:'🌤️'},
+    {id:'evening',label:'Evening',icon:'🌙'},{id:'other',label:'Other',icon:'···'},
+  ];
+
   useEffect(()=>{
-    const handler=BackHandler.addEventListener('hardwareBackPress',()=>{onBack();return true;});
+    const handler=BackHandler.addEventListener('hardwareBackPress',()=>{
+      if(step===1){onBack();return true;}
+      goBack(); return true;
+    });
     return()=>handler.remove();
-  },[]);
-  const toggleRest=(d)=>setRestDays(p=>p.includes(d)?p.filter(x=>x!==d):[...p,d]);
-  const handleTime=(e,date)=>{setShowPicker(false);if(e.type==='dismissed'||!date)return;const alarm={hour:date.getHours(),minute:date.getMinutes()};if(editIdx!==null){const u=[...alarms];u[editIdx]=alarm;setAlarms(u);}else setAlarms(p=>[...p,alarm]);setEditIdx(null);};
+  },[step]);
+
+  const goNext=()=>{
+    Haptics.selectionAsync();
+    let next=step+1;
+    if(step===2&&habitType==='checkmark') next=4;
+    setStep(next);
+  };
+  const goBack=()=>{
+    Haptics.selectionAsync();
+    if(step===1){onBack();return;}
+    let prev=step-1;
+    if(step===4&&habitType==='checkmark') prev=2;
+    setStep(prev);
+  };
+  const canContinue=()=>{
+    if(step===2) return name.trim().length>0;
+    return true;
+  };
+  const toggleCategory=(id)=>{
+    Haptics.selectionAsync();
+    setCategories(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  };
+  const handleTimeChange=(event,date)=>{
+    if(Platform.OS==='android') setShowPicker(false);
+    if(event.type==='dismissed'||!date) return;
+    setAlarms([{hour:date.getHours(),minute:date.getMinutes()}]);
+  };
   const save=async()=>{
     if(!name.trim()){Alert.alert('Required','Enter a habit name.');return;}
     setSaving(true);
-    const habit={id:existing?.id||`h_${Date.now()}`,name:name.trim(),icon,color,restDays,alarms,duration:parseInt(duration)||0,createdAt:existing?.createdAt||new Date().toISOString()};
+    const finalAlarms=reminderOn?alarms:[];
+    const habit={
+      id:existing?.id||`h_${Date.now()}`,
+      name:name.trim(),icon,color,
+      habitType,habitDirection,
+      unit:habitType==='measurable'?(unit==='Custom…'?customUnit:unit):null,
+      dailyTarget:habitType==='measurable'?(dailyTarget?parseFloat(dailyTarget):null):null,
+      categories:habitType==='measurable'?categories:[],
+      restDays:existing?.restDays||[],
+      duration:existing?.duration||0,
+      alarms:finalAlarms,
+      createdAt:existing?.createdAt||new Date().toISOString(),
+    };
     await cancelHabitAlarms(habit.id);
-    for(const a of alarms)await scheduleAlarm(habit,a);
+    for(const a of finalAlarms) await scheduleAlarm(habit,a);
     const habits=await Store.get('habits',[]);
-    if(existing){await Store.set('habits',habits.map(h=>h.id===existing.id?habit:h));}else{await Store.set('habits',[...habits,habit]);}
-    setSaving(false);onSave();
+    if(existing){await Store.set('habits',habits.map(h=>h.id===existing.id?habit:h));}
+    else{await Store.set('habits',[...habits,habit]);}
+    setSaving(false);
+    onSave();
   };
+
+  const visualTotal=habitType==='checkmark'?3:4;
+  const visualCurrent=habitType==='checkmark'&&step===4?3:step;
+  const isLastStep=step===4;
+
+  const renderStep1=()=>(
+    <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:16,paddingTop:32,paddingBottom:120}}>
+      <Text style={{fontSize:26,fontWeight:'900',color:C.text,marginBottom:24}}>What kind of habit?</Text>
+      {HABIT_TYPES.map(t=>{
+        const sel=habitType===t.id;
+        return(
+          <TouchableOpacity key={t.id} onPress={()=>{Haptics.selectionAsync();setHabitType(t.id);}}
+            style={{flexDirection:'row',alignItems:'center',backgroundColor:C.card,borderRadius:16,borderWidth:1.5,borderColor:sel?C.primary:C.border,backgroundColor:sel?C.primary+'15':C.card,padding:16,marginBottom:10,gap:14}}>
+            <View style={{width:48,height:48,borderRadius:14,backgroundColor:sel?C.primary+'30':C.section,alignItems:'center',justifyContent:'center'}}>
+              <Text style={{fontSize:22}}>{t.icon}</Text>
+            </View>
+            <View style={{flex:1}}>
+              <Text style={{fontSize:17,fontWeight:'800',color:sel?C.primary:C.text,marginBottom:2}}>{t.label}</Text>
+              <Text style={{fontSize:12,color:C.textMuted}}>{t.sub}</Text>
+            </View>
+            <View style={{width:22,height:22,borderRadius:11,borderWidth:2,borderColor:sel?C.primary:C.border,alignItems:'center',justifyContent:'center'}}>
+              {sel&&<View style={{width:11,height:11,borderRadius:6,backgroundColor:C.primary}}/>}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+      {habitType==='checkmark'&&(
+        <View style={{marginTop:12}}>
+          <View style={{flexDirection:'row',gap:10,marginBottom:10}}>
+            {HABIT_DIRECTIONS.map(d=>{
+              const active=habitDirection===d.id;
+              return(
+                <TouchableOpacity key={d.id} onPress={()=>{Haptics.selectionAsync();setHabitDirection(d.id);}}
+                  style={{flex:1,flexDirection:'row',alignItems:'center',justifyContent:'center',paddingVertical:12,borderRadius:12,borderWidth:1.5,borderColor:active?C.primary:C.border,backgroundColor:active?C.primary+'15':C.card}}>
+                  <Text style={{fontSize:14,marginRight:6}}>{d.icon}</Text>
+                  <Text style={{fontSize:13,fontWeight:'700',color:active?C.primary:C.text}}>{d.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <View style={{flexDirection:'row',alignItems:'flex-start',backgroundColor:C.card,borderRadius:12,borderWidth:1,borderColor:C.border,padding:12}}>
+            <Text style={{fontSize:13,marginRight:6}}>ℹ️</Text>
+            <Text style={{flex:1,fontSize:12,color:C.textSub,lineHeight:18}}>
+              {HABIT_DIRECTIONS.find(d=>d.id===habitDirection)?.desc}
+            </Text>
+          </View>
+        </View>
+      )}
+    </ScrollView>
+  );
+
+  const renderStep2=()=>(
+    <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:16,paddingTop:32,paddingBottom:120}}>
+      <Text style={{fontSize:26,fontWeight:'900',color:C.text,marginBottom:24}}>Name Your Habit</Text>
+      <View style={{alignItems:'center',marginBottom:28}}>
+        <View style={{width:90,height:90,borderRadius:45,backgroundColor:color+'30',alignItems:'center',justifyContent:'center',marginBottom:14}}>
+          <Text style={{fontSize:38}}>{icon}</Text>
+        </View>
+        <TextInput style={{fontSize:22,fontWeight:'800',color:C.text,width:'80%',textAlign:'center'}}
+          value={name} onChangeText={setName} placeholder="e.g. Morning Run"
+          placeholderTextColor={C.textMuted} maxLength={40} autoFocus={!existing}/>
+        <View style={{height:1.5,width:'80%',backgroundColor:C.border,marginTop:6}}/>
+      </View>
+      <Text style={{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginBottom:10}}>Select Icon</Text>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginBottom:24}}>
+        {ICONS.map(ic=>(
+          <TouchableOpacity key={ic} onPress={()=>{Haptics.selectionAsync();setIcon(ic);}}
+            style={{width:50,height:50,borderRadius:12,alignItems:'center',justifyContent:'center',backgroundColor:C.card,borderWidth:1.5,borderColor:icon===ic?color:C.border,backgroundColor:icon===ic?color+'22':C.card}}>
+            <Text style={{fontSize:24}}>{ic}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginBottom:10}}>Select Color</Text>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>
+        {C.palette.map(c=>(
+          <TouchableOpacity key={c} onPress={()=>{Haptics.selectionAsync();setColor(c);}}
+            style={{width:38,height:38,borderRadius:19,backgroundColor:c,alignItems:'center',justifyContent:'center',borderWidth:color===c?3:0,borderColor:'#fff'}}>
+            {color===c&&<Text style={{color:'#fff',fontWeight:'900',fontSize:14}}>✓</Text>}
+          </TouchableOpacity>
+        ))}
+      </View>
+    </ScrollView>
+  );
+
+  const renderStep3=()=>(
+    <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:16,paddingTop:32,paddingBottom:120}}>
+      <Text style={{fontSize:26,fontWeight:'900',color:C.text,marginBottom:24}}>How do you track it?</Text>
+      <Text style={{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginBottom:10}}>Unit</Text>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginBottom:10}}>
+        {UNITS.map(u=>{
+          const sel=unit===u;
+          return(
+            <TouchableOpacity key={u} onPress={()=>{Haptics.selectionAsync();setUnit(u);}}
+              style={{paddingHorizontal:14,paddingVertical:8,borderRadius:99,borderWidth:1.5,borderColor:sel?C.primary:C.border,backgroundColor:sel?C.primary+'20':C.card}}>
+              <Text style={{fontSize:13,fontWeight:sel?'800':'600',color:sel?C.primary:C.text}}>{u}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {unit==='Custom…'&&(
+        <TextInput style={{backgroundColor:C.card,borderRadius:12,borderWidth:1.5,borderColor:C.primary,paddingHorizontal:16,paddingVertical:12,color:C.text,fontSize:15,fontWeight:'600',marginBottom:10}}
+          value={customUnit} onChangeText={setCustomUnit} placeholder="Enter custom unit…" placeholderTextColor={C.textMuted} maxLength={20}/>
+      )}
+      <Text style={{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginTop:20,marginBottom:10}}>Daily target (optional)</Text>
+      <View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:6}}>
+        <TextInput style={{width:120,backgroundColor:C.card,borderRadius:12,borderWidth:1.5,borderColor:C.border,paddingHorizontal:16,paddingVertical:12,color:C.text,fontSize:18,fontWeight:'700'}}
+          value={dailyTarget} onChangeText={setDailyTarget} placeholder="0"
+          placeholderTextColor={C.textMuted} keyboardType="numeric" maxLength={8}/>
+        <Text style={{fontSize:18,fontWeight:'700',color:C.primary}}>{unit==='Custom…'?(customUnit||'unit'):unit}</Text>
+      </View>
+      <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:20}}>Leave empty to log any positive value.</Text>
+      <View style={{height:1,backgroundColor:C.border,marginBottom:20}}/>
+      <Text style={{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginBottom:10}}>Categories</Text>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
+        {CATEGORIES.map(cat=>{
+          const sel=categories.includes(cat.id);
+          return(
+            <TouchableOpacity key={cat.id} onPress={()=>toggleCategory(cat.id)}
+              style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:8,borderRadius:99,borderWidth:1.5,borderColor:sel?C.primary:C.border,backgroundColor:sel?C.primary+'18':C.card}}>
+              <Text style={{fontSize:13,marginRight:4}}>{cat.icon}</Text>
+              <Text style={{fontSize:12,fontWeight:sel?'700':'600',color:sel?C.primary:C.textSub}}>{cat.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
+
+  const renderStep4=()=>{
+    const reminderTime=alarms[0]||{hour:9,minute:0};
+    return(
+      <ScrollView style={{flex:1}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:16,paddingTop:32,paddingBottom:120}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+          <Text style={{fontSize:26,fontWeight:'900',color:C.text,flex:1}}>Set a Daily Reminder</Text>
+          <TouchableOpacity onPress={()=>{Haptics.selectionAsync();setReminderOn(p=>!p);}}
+            style={{width:52,height:30,borderRadius:15,backgroundColor:reminderOn?C.primary:C.section,justifyContent:'center',paddingHorizontal:3}}>
+            <View style={{width:24,height:24,borderRadius:12,backgroundColor:'#fff',alignSelf:reminderOn?'flex-end':'flex-start'}}/>
+          </TouchableOpacity>
+        </View>
+        <Text style={{fontSize:13,color:C.textMuted,fontStyle:'italic',marginBottom:32,lineHeight:20}}>
+          People who set reminders are 3× more likely to stick with their habits.
+        </Text>
+        {reminderOn&&(
+          <>
+            <TouchableOpacity onPress={()=>{const d=new Date();d.setHours(reminderTime.hour,reminderTime.minute,0);setPickerDate(d);setShowPicker(true);}}
+              style={{alignItems:'center',backgroundColor:C.card,borderRadius:20,padding:28,marginBottom:14,borderWidth:1.5,borderColor:C.border}}>
+              <Text style={{fontSize:52,fontWeight:'900',color:C.primary,letterSpacing:-1}}>{fmtAlarm(reminderTime)}</Text>
+              <Text style={{fontSize:12,color:C.textMuted,marginTop:6}}>Tap to change</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={()=>{const d=new Date();d.setHours(reminderTime.hour,reminderTime.minute,0);setPickerDate(d);setShowPicker(true);}}
+              style={{borderWidth:1.5,borderColor:C.primary,borderRadius:14,paddingVertical:16,alignItems:'center',marginBottom:14}}>
+              <Text style={{fontSize:15,fontWeight:'700',color:C.primary}}>+ Set This Time</Text>
+            </TouchableOpacity>
+            {showPicker&&<DateTimePicker value={pickerDate} mode="time" is24Hour={false} onChange={handleTimeChange}/>}
+            <Text style={{fontSize:12,color:C.textMuted,textAlign:'center',fontStyle:'italic',marginTop:24}}>
+              More reminders can be added later from the habit settings.
+            </Text>
+          </>
+        )}
+      </ScrollView>
+    );
+  };
+
   return(
     <View style={{flex:1,backgroundColor:C.bg}}>
-      <LinearGradient colors={[C.primary,C.primaryLight]} style={st.modalHeader}>
-        <TouchableOpacity onPress={onBack} style={st.closeBtn}><Text style={st.closeTxt}>✕</Text></TouchableOpacity>
-        <Text style={st.modalTitle}>{existing?'Edit Habit':'New Habit'}</Text>
-        <TouchableOpacity onPress={save} disabled={saving} style={st.saveHdrBtn}><Text style={st.saveHdrTxt}>{saving?'…':'Save'}</Text></TouchableOpacity>
-      </LinearGradient>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{padding:16,paddingBottom:60}}>
-        <Text style={st.label}>HABIT NAME</Text>
-        <View style={st.inputWrap}><Text style={{fontSize:22,marginRight:8}}>{icon}</Text><TextInput style={st.input} value={name} onChangeText={setName} placeholder="e.g. Morning Run" placeholderTextColor={C.textMuted} maxLength={40} autoFocus={!existing}/></View>
-        <Text style={[st.label,{marginTop:20}]}>ICON</Text>
-        <View style={{flexDirection:'row',flexWrap:'wrap',gap:6}}>{ICONS.map(ic=>(<TouchableOpacity key={ic} onPress={()=>{Haptics.selectionAsync();setIcon(ic);}} style={[st.iconBtn,icon===ic&&{backgroundColor:color+'22',borderColor:color,borderWidth:2}]}><Text style={{fontSize:22}}>{ic}</Text></TouchableOpacity>))}</View>
-        <Text style={[st.label,{marginTop:20}]}>COLOR</Text>
-        <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{C.palette.map(c=>(<TouchableOpacity key={c} onPress={()=>{Haptics.selectionAsync();setColor(c);}} style={[{width:36,height:36,borderRadius:18,backgroundColor:c,alignItems:'center',justifyContent:'center'},color===c&&{borderWidth:3,borderColor:'#fff'}]}>{color===c&&<Text style={{color:'#fff',fontWeight:'900'}}>✓</Text>}</TouchableOpacity>))}</View>
-        <Text style={[st.label,{marginTop:20}]}>⏱️ DURATION (minutes)</Text>
-        <View style={st.inputWrap}>
-          <Text style={{fontSize:22,marginRight:8}}>⏱️</Text>
-          <TextInput style={st.input} value={duration} onChangeText={setDuration} placeholder="How long? e.g. 30" placeholderTextColor={C.textMuted} keyboardType="numeric" maxLength={3}/>
-          <Text style={{fontSize:14,color:C.textMuted,marginRight:8}}>min</Text>
-        </View>
-        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginTop:20,marginBottom:8}}>
-          <Text style={st.label}>⏰ ALARMS</Text>
-          <TouchableOpacity onPress={()=>{setEditIdx(null);setPickerDate(new Date());setShowPicker(true);}} style={[st.addAlarmBtn,{backgroundColor:color}]}><Text style={{color:'#fff',fontWeight:'700',fontSize:13}}>+ Add Alarm</Text></TouchableOpacity>
-        </View>
-        {alarms.length===0&&<Text style={{fontSize:13,color:C.textMuted,fontStyle:'italic'}}>No alarms. Phone rings at set times.</Text>}
-        {alarms.map((a,i)=>(<View key={i} style={st.alarmRow}><Text style={[{flex:1,fontSize:20,fontWeight:'900'},{color}]}>{fmtAlarm(a)}</Text><Text style={{fontSize:11,color:C.textMuted,marginRight:8}}>Daily</Text><TouchableOpacity onPress={()=>{setEditIdx(i);const d=new Date();d.setHours(a.hour,a.minute);setPickerDate(d);setShowPicker(true);}} style={st.alarmEditBtn}><Text style={{color:C.primary,fontWeight:'700',fontSize:12}}>Edit</Text></TouchableOpacity><TouchableOpacity onPress={()=>setAlarms(p=>p.filter((_,j)=>j!==i))} style={st.alarmDelBtn}><Text style={{color:C.danger,fontWeight:'700',fontSize:12}}>✕</Text></TouchableOpacity></View>))}
-        {showPicker&&<DateTimePicker value={pickerDate} mode="time" is24Hour={false} onChange={handleTime}/>}
-        <Text style={[st.label,{marginTop:20}]}>😴 REST DAYS</Text>
-        <View style={{flexDirection:'row',gap:6}}>{DAYS_SHORT.map((d,i)=>(<TouchableOpacity key={i} onPress={()=>toggleRest(i)} style={[st.dayBtn,restDays.includes(i)&&{backgroundColor:C.textMuted+'22',borderColor:C.textMuted}]}><Text style={[{fontSize:12,fontWeight:'800',color:C.text},restDays.includes(i)&&{color:C.textSub}]}>{d}</Text></TouchableOpacity>))}</View>
-        <Text style={[st.label,{marginTop:20}]}>PREVIEW</Text>
-        <View style={[st.habitCard,{backgroundColor:color}]}>
-          <View style={st.habitIconWrap}><Text style={{fontSize:24}}>{icon}</Text></View>
-          <View style={{flex:1,marginLeft:10}}>
-            <Text style={st.habitName}>{name||'Habit Name'}</Text>
-            <View style={{flexDirection:'row',gap:6,marginTop:4,flexWrap:'wrap'}}>
-              {alarms.length>0&&<Text style={{fontSize:11,color:'rgba(255,255,255,0.80)'}}>⏰ {alarms.map(fmtAlarm).join(' · ')}</Text>}
-              {parseInt(duration)>0&&<Text style={{fontSize:11,color:'rgba(255,255,255,0.80)'}}>⏱️ {duration}min</Text>}
+      {/* Header */}
+      <View style={{flexDirection:'row',alignItems:'center',paddingTop:56,paddingBottom:10,paddingHorizontal:16,gap:12}}>
+        <TouchableOpacity onPress={goBack} style={{width:36,height:36,borderRadius:18,backgroundColor:C.card,alignItems:'center',justifyContent:'center',borderWidth:1.5,borderColor:C.border}}>
+          <Text style={{fontSize:16,fontWeight:'700',color:C.text}}>{step===1?'✕':'←'}</Text>
+        </TouchableOpacity>
+        <View style={{flex:1,flexDirection:'row',gap:6}}>
+          {Array.from({length:visualTotal}).map((_,i)=>(
+            <View key={i} style={{flex:1,height:5,borderRadius:3,backgroundColor:C.section,overflow:'hidden'}}>
+              <View style={{height:'100%',width:i<visualCurrent?'100%':'0%',borderRadius:3,backgroundColor:C.primary}}/>
             </View>
-          </View>
-          <View style={st.check}/>
+          ))}
         </View>
-        <View style={{marginTop:20,backgroundColor:'#FF8C4222',borderRadius:12,padding:14,borderWidth:1.5,borderColor:'#FF8C42'}}>
-          <Text style={{fontSize:13,fontWeight:'800',color:'#FF8C42',marginBottom:6}}>📱 Xiaomi Notification Fix</Text>
-          <Text style={{fontSize:12,color:C.textSub,lineHeight:18}}>For alarms to work when app is closed:{'\n'}Settings → Apps → HabitAlarm → Other Permissions → Enable Autostart ✅{'\n'}Also: Battery → No Restrictions</Text>
-        </View>
-      </ScrollView>
+      </View>
+      {/* Steps */}
+      {step===1&&renderStep1()}
+      {step===2&&renderStep2()}
+      {step===3&&renderStep3()}
+      {step===4&&renderStep4()}
+      {/* Bottom button */}
+      <View style={{position:'absolute',bottom:0,left:0,right:0,paddingHorizontal:16,paddingBottom:Platform.OS==='ios'?36:20,paddingTop:10,backgroundColor:C.bg,borderTopWidth:1,borderTopColor:C.border}}>
+        <TouchableOpacity onPress={isLastStep?save:goNext} disabled={!canContinue()||saving}
+          style={{borderRadius:16,paddingVertical:16,alignItems:'center',backgroundColor:canContinue()?C.primary:C.section,opacity:canContinue()?1:0.5}}>
+          <Text style={{fontSize:17,fontWeight:'800',color:canContinue()?'#fff':C.textMuted}}>
+            {isLastStep?(saving?'Saving…':'Save Habit'):'Continue'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
