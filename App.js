@@ -534,7 +534,12 @@ const handleMeasurableTap=async()=>{
 </View>
 {/* Todo list expanded section */}
 {expandedHabit===h.id&&(
-  <View style={{backgroundColor:C.card,borderBottomLeftRadius:20,borderBottomRightRadius:20,paddingHorizontal:14,paddingBottom:12,marginTop:-10,paddingTop:16,borderWidth:1.5,borderTopWidth:0,borderColor:C.border}}>
+  <View <TouchableOpacity onPress={()=>onHabitDetail(h)}
+  style={{flexDirection:'row',alignItems:'center',justifyContent:'flex-end',marginBottom:8}}>
+  <Text style={{fontSize:12,color:C.primary,fontWeight:'700'}}>View Details →</Text>
+</TouchableOpacity>
+  
+ style={{backgroundColor:C.card,borderBottomLeftRadius:20,borderBottomRightRadius:20,paddingHorizontal:14,paddingBottom:12,marginTop:-10,paddingTop:16,borderWidth:1.5,borderTopWidth:0,borderColor:C.border}}>
     {(todos[h.id]||[]).length===0&&addingTaskFor!==h.id&&(
       <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:8}}>No tasks yet. Tap + to add one.</Text>
     )}
