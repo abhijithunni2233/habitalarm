@@ -245,7 +245,14 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
   const hour=new Date().getHours();
   const greeting=hour<12?'Morning,':hour<17?'Afternoon,':'Evening,';
   const active=habits.filter(h=>!h.restDays?.includes(dayIdx));
-  const done=active.filter(h=>logs[selectedDate]?.[h.id]===true).length;
+ const done=active.filter(h=>{
+  const tl=logs[selectedDate]?.[h.id];
+  if(h.habitType==='measurable'){
+    const t=h.dailyTarget||null;
+    return t?(typeof tl==='number'&&tl>=t):(typeof tl==='number'&&tl>0);
+  }
+  return tl===true;
+}).length;
   const todayMood=moods[selectedDate]||null;
   const info=getLevelInfo(user.xp);
   const pct=active.length>0?Math.round((done/active.length)*100):0;
@@ -269,7 +276,14 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
     await Store.set('logs',nl);await Store.set('user',nu);
     if(completing){
       playTick();
-      const newDone=active.filter(hh=>nl[selectedDate]?.[hh.id]===true).length;
+     const newDone=active.filter(hh=>{
+  const tl=nl[selectedDate]?.[hh.id];
+  if(hh.habitType==='measurable'){
+    const t=hh.dailyTarget||null;
+    return t?(typeof tl==='number'&&tl>=t):(typeof tl==='number'&&tl>0);
+  }
+  return tl===true;
+}).length;
       if(newDone===active.length&&active.length>0)setTimeout(()=>playApplause(),300);
       setRemarkHabit(h);setRemarkModal(true);
     }
