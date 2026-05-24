@@ -1140,7 +1140,7 @@ const [todoLogs,setTodoLogs]=useState({});
   const [tab,setTab]=useState('home');
   useEffect(()=>{
     setupNotifications();
-    Promise.all([Store.get('habits',[]),Store.get('logs',{}),Store.get('moods',{}),Store.get('user',{xp:0,name:'Champion'}),Store.get('goals',[]),Store.get('remarks',{}) Store.get('todos',{}),
+    Promise.all([Store.get('habits',[]),Store.get('logs',{}),Store.get('moods',{}),Store.get('user',{xp:0,name:'Champion'}),Store.get('goals',[]),Store.get('remarks',{}),Store.get('todos',{}),
 Store.get('todologs',{}),Store.get('onboarded',false)]).then(([h,l,m,u,g,r,onboarded,td,tl])=>{setHabits(h);setLogs(l);setMoods(m);setUser(u);setGoals(g);setRemarks(r);setTodos(td);setTodoLogs(tl);if(!onboarded)setShowOnboarding(true);});
   },[]);
   useEffect(()=>{
