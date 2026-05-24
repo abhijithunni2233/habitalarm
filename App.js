@@ -1,3 +1,4 @@
+import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,8 +27,30 @@ async function scheduleAlarm(habit,alarm) {
 async function cancelHabitAlarms(habitId) {
   try{const all=await Notifications.getAllScheduledNotificationsAsync();for(const n of all){if(n.identifier.startsWith(`habit_${habitId}`))await Notifications.cancelScheduledNotificationAsync(n.identifier);}}catch(e){}
 }
-async function playTick(){try{await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);}catch(e){}}
-async function playApplause(){try{await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);}catch(e){}}
+async function playTick(){
+  try{
+    await Audio.setAudioModeAsync({playsInSilentModeIOS:true});
+    const{sound}=await Audio.Sound.createAsync(
+      {uri:'https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg'},
+      {shouldPlay:true,volume:1.0}
+    );
+    sound.setOnPlaybackStatusUpdate(status=>{
+      if(status.didJustFinish) sound.unloadAsync();
+    });
+  }catch(e){}
+}
+async function playApplause(){
+  try{
+    await Audio.setAudioModeAsync({playsInSilentModeIOS:true});
+    const{sound}=await Audio.Sound.createAsync(
+      {uri:'https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg'},
+      {shouldPlay:true,volume:1.0}
+    );
+    sound.setOnPlaybackStatusUpdate(status=>{
+      if(status.didJustFinish) sound.unloadAsync();
+    });
+  }catch(e){}
+}
 const C={bg:'#F0EEFF',card:'#FFFFFF',section:'#EAE6FF',border:'#E2DCF8',primary:'#6C3CE1',primaryLight:'#8B5CF6',primaryPale:'#EDE9FF',text:'#1A1040',textSub:'#6B6490',textMuted:'#B0A8CC',success:'#06D6A0',successPale:'#E6FBF5',danger:'#FF6B6B',dangerPale:'#FFF0F0',gold:'#F4A021',goldPale:'#FFF7E6',mood1:'#FF6B6B',mood2:'#FF8C42',mood3:'#FFD93D',mood4:'#8BCE6C',mood5:'#06D6A0',palette:['#4F8EF7','#FF8C42','#9B5DE5','#FF6B9D','#06D6A0','#F4A021','#4CC9F0','#F72585','#43AA8B','#E76F51']};
 const ICONS=['💪','🏃','📚','💧','🧘','🎯','💤','🥗','🎵','✍️','🧠','❤️','🌅','🚴','🏋️','🎨','📱','💊','🌿','☕','🦷','🧹','💰','🙏'];
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
