@@ -418,6 +418,7 @@ function AddHabitScreen({existing, onSave, onBack}) {
   const [unit, setUnit] = useState(existing?.unit || 'km');
   const [customUnit, setCustomUnit] = useState(existing?.customUnit || '');
   const [dailyTarget, setDailyTarget] = useState(existing?.dailyTarget ? String(existing.dailyTarget) : '');
+  const [increment, setIncrement] = useState(existing?.increment ? String(existing.increment) : '1');
   const [categories, setCategories] = useState(existing?.categories || []);
   const [reminderOn, setReminderOn] = useState(existing?.alarms?.length > 0);
   const [alarms, setAlarms] = useState(existing?.alarms || [{hour:9,minute:0}]);
@@ -486,7 +487,8 @@ function AddHabitScreen({existing, onSave, onBack}) {
       name:name.trim(),icon,color,
       habitType,habitDirection,
       unit:habitType==='measurable'?(unit==='Custom…'?customUnit:unit):null,
-      dailyTarget:habitType==='measurable'?(dailyTarget?parseFloat(dailyTarget):null):null,
+dailyTarget:habitType==='measurable'?(dailyTarget?parseFloat(dailyTarget):null):null,
+increment:habitType==='measurable'?(increment?parseFloat(increment):1):null,
       categories:habitType==='measurable'?categories:[],
       restDays:existing?.restDays||[],
       duration:existing?.duration||0,
@@ -612,6 +614,17 @@ function AddHabitScreen({existing, onSave, onBack}) {
         <Text style={{fontSize:18,fontWeight:'700',color:C.primary}}>{unit==='Custom…'?(customUnit||'unit'):unit}</Text>
       </View>
       <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:20}}>Leave empty to log any positive value.</Text>
+            <Text style={{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginTop:20,marginBottom:10}}>Button Increment</Text>
+<View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:6}}>
+  <TextInput
+    style={{width:120,backgroundColor:C.card,borderRadius:12,borderWidth:1.5,borderColor:C.border,paddingHorizontal:16,paddingVertical:12,color:C.text,fontSize:18,fontWeight:'700'}}
+    value={increment} onChangeText={setIncrement} placeholder="1"
+    placeholderTextColor={C.textMuted} keyboardType="numeric" maxLength={6}/>
+  <Text style={{fontSize:18,fontWeight:'700',color:C.primary}}>{unit==='Custom…'?(customUnit||'unit'):unit}</Text>
+</View>
+<Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:20}}>
+  How much each tap of the + button adds.
+</Text>
       <View style={{height:1,backgroundColor:C.border,marginBottom:20}}/>
       <Text style={{fontSize:13,fontWeight:'800',color:C.textSub,textTransform:'uppercase',letterSpacing:0.8,marginBottom:10}}>Categories</Text>
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
