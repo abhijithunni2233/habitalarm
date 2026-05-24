@@ -364,6 +364,28 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
             else{Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();}
           },
         });
+const isMeasurable=h.habitType==='measurable';
+const todayLog=logs[selectedDate]?.[h.id];
+const measurableCount=isMeasurable&&typeof todayLog==='number'?todayLog:0;
+const measurableTarget=h.dailyTarget||null;
+const measurableIncrement=h.increment||1;
+const measurablePct=measurableTarget?Math.min(measurableCount/measurableTarget,1):(measurableCount>0?1:0);
+const handleMeasurableTap=async()=>{
+  if(isRest)return;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const nl={...logs};if(!nl[selectedDate])nl[selectedDate]={};
+  const prev=typeof nl[selectedDate][h.id]==='number'?nl[selectedDate][h.id]:0;
+  const next=prev+measurableIncrement;
+  nl[selectedDate][h.id]=next;
+  const wasDone=measurableTarget?prev>=measurableTarget:prev>0;
+  const nowDone=measurableTarget?next>=measurableTarget:next>0;
+  const xpDelta=(!wasDone&&nowDone)?10:0;
+  const nu={...user,xp:Math.max(0,user.xp+xpDelta)};
+  setLogs(nl);setUser(nu);
+  await Store.set('logs',nl);await Store.set('user',nu);
+  if(!wasDone&&nowDone){playTick();}
+};
+        
         const handleCheck=()=>{if(isRest)return;Animated.sequence([Animated.spring(scaleAnim,{toValue:0.92,useNativeDriver:true}),Animated.spring(scaleAnim,{toValue:1,useNativeDriver:true,tension:200})]).start();toggle(h);};
         return(
           <View key={h.id} style={{paddingHorizontal:16,marginBottom:10}}>
@@ -384,15 +406,28 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
                     {h.alarms?.length>0&&<Text style={st.habitAlarm}>⏰ {fmtAlarm(h.alarms[0])}</Text>}
                     {h.duration>0&&<Text style={st.habitAlarm}>⏱️ {h.duration}min</Text>}
                     {isRest&&<Text style={st.habitRest}>😴 Rest</Text>}
-                    {remark&&<Text style={st.habitRemark}>{remark.emoji}{remark.note?' · '+remark.note:''}</Text>}
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={handleCheck} style={st.checkBtn} disabled={isRest}>
-                  <View style={[st.check,isCompleted&&st.checkDone,isNotDone&&{backgroundColor:C.danger+'33',borderColor:C.danger}]}>
-                    {isCompleted&&<Text style={{fontSize:16,fontWeight:'900',color:bg}}>✓</Text>}
-                    {isNotDone&&<Text style={{fontSize:16,fontWeight:'900',color:C.danger}}>✕</Text>}
-                  </View>
-                </TouchableOpacity>
+                 {remark&&<Text style={st.habitRemark}>{remark.emoji}{remark.note?' · '+remark.note:''}</Text>}
+</View>
+{isMeasurable&&measurableTarget&&(
+  <View style={{height:4,backgroundColor:'rgba(255,255,255,0.25)',borderRadius:99,marginTop:6,overflow:'hidden'}}>
+    <View style={{height:'100%',width:`${measurablePct*100}%`,backgroundColor:'#fff',borderRadius:99}}/>
+  </View>
+)}
+</TouchableOpacity>
+              {isMeasurable&&!isRest&&!isNotDone?(
+  <TouchableOpacity onPress={handleMeasurableTap}
+    style={{backgroundColor:'rgba(255,255,255,0.25)',borderRadius:12,paddingHorizontal:10,paddingVertical:8,alignItems:'center',justifyContent:'center',marginLeft:8}}>
+    <Text style={{color:'#fff',fontWeight:'900',fontSize:13}}>+{measurableIncrement}</Text>
+    <Text style={{color:'rgba(255,255,255,0.80)',fontSize:9,fontWeight:'700'}}>{h.unit||'unit'}</Text>
+  </TouchableOpacity>
+):(
+  <TouchableOpacity onPress={handleCheck} style={st.checkBtn} disabled={isRest}>
+    <View style={[st.check,isCompleted&&st.checkDone,isNotDone&&{backgroundColor:C.danger+'33',borderColor:C.danger}]}>
+      {isCompleted&&<Text style={{fontSize:16,fontWeight:'900',color:bg}}>✓</Text>}
+      {isNotDone&&<Text style={{fontSize:16,fontWeight:'900',color:C.danger}}>✕</Text>}
+    </View>
+  </TouchableOpacity>
+)}
               </Animated.View>
             </View>
           </View>
