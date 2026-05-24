@@ -32,7 +32,7 @@ async function playTick(){
   try{
     await Audio.setAudioModeAsync({playsInSilentModeIOS:true});
     const{sound}=await Audio.Sound.createAsync(
-      {uri:'https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg'},
+     {uri:'https://actions.google.com/sounds/v1/rpg/level_up.ogg'},
       {shouldPlay:true,volume:1.0}
     );
     sound.setOnPlaybackStatusUpdate(status=>{
@@ -44,7 +44,7 @@ async function playApplause(){
   try{
     await Audio.setAudioModeAsync({playsInSilentModeIOS:true});
     const{sound}=await Audio.Sound.createAsync(
-      {uri:'https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg'},
+     {uri:'https://actions.google.com/sounds/v1/rpg/all_intro_enter_1.ogg'},
       {shouldPlay:true,volume:1.0}
     );
     sound.setOnPlaybackStatusUpdate(status=>{
@@ -302,6 +302,46 @@ const toggleTodoLog=async(habitId,todoId)=>{
   nl[key][todoId]=!nl[key][todoId];
   setTodoLogs(nl);
   await Store.set('todologs',nl);
+
+  // Check if all todos for this habit are now completed
+  const habitTodos=todos[habitId]||[];
+  if(habitTodos.length>0){
+    const allDone=habitTodos.every(t=>nl[key][t.id]===true);
+    const logs2={...logs};
+    if(!logs2[key])logs2[key]={};
+    const wasAlreadyDone=logs2[key][habitId]===true;
+    if(allDone&&!wasAlreadyDone){
+      // Mark habit as done
+      logs2[key][habitId]=true;
+      const newXp=user.xp+10;
+      const nu={...user,xp:newXp};
+      setLogs(logs2);setUser(nu);
+      await Store.set('logs',logs2);
+      await Store.set('user',nu);
+      playTick();
+      // Check if all active habits done
+      const activeHabits=habits.filter(h=>!h.restDays?.includes(new Date().getDay()));
+      const newDone=activeHabits.filter(h=>{
+        const tl=logs2[key]?.[h.id];
+        if(h.habitType==='measurable'){
+          const t=h.dailyTarget||null;
+          return t?(typeof tl==='number'&&tl>=t):(typeof tl==='number'&&tl>0);
+        }
+        return tl===true;
+      }).length;
+      if(newDone===activeHabits.length&&activeHabits.length>0){
+        setTimeout(()=>playApplause(),300);
+      }
+    } else if(!allDone&&wasAlreadyDone){
+      // Unmark habit if a todo is unchecked
+      logs2[key][habitId]=false;
+      const newXp=Math.max(0,user.xp-10);
+      const nu={...user,xp:newXp};
+      setLogs(logs2);setUser(nu);
+      await Store.set('logs',logs2);
+      await Store.set('user',nu);
+    }
+  }
 };
 
 const addTodo=async(habitId)=>{
@@ -968,7 +1008,16 @@ function StatsScreen({habits,logs,moods,onMonthly}){
         {habits.map(h=>{
           const streak=getStreak(logs,h.id);const r7=getRate(logs,h.id,7);const r30=getRate(logs,h.id,30);
           const totalHabitMin=Object.values(logs).filter(d=>d[h.id]===true).length*(h.duration||0);
-          return(<View key={h.id} style={st.breakdownCard}><View style={{width:44,height:44,borderRadius:14,backgroundColor:h.color||C.primary,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:20}}>{h.icon}</Text></View><View style={{flex:1,marginLeft:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={{fontSize:14,fontWeight:'700',color:C.text,flex:1}}>{h.name}</Text><Text style={{fontSize:12,color:C.gold,fontWeight:'700'}}>🔥 {streak}</Text></View><View style={{height:7,backgroundColor:C.section,borderRadius:99,overflow:'hidden',marginVertical:6}}><View style={{height:'100%',width:`${r7}%`,backgroundColor:h.color||C.primary,borderRadius:99}}/></View><Text style={{fontSize:11,color:C.textSub}}>7d: {r7}% · 30d: {r30}%{totalHabitMin>0?` · ⏱️ ${(totalHabitMin/60).toFixed(1)}h`:''}</Text></View></View>);
+          return(<View key={h.id} style={st.breakdownCard}><View style={{width:44,height:44,borderRadius:14,backgroundColor:h.color||C.primary,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:20}}>{h.icon}</Text></View><View style={{flex:1,marginLeft:12}}><View style={{flexDirection:'row',justifyContent:'space-between'}}><View style={{flexDirection:'row',alignItems:'center',flex:1,gap:6}}>
+  <Text style={{fontSize:14,fontWeight:'700',color:C.text,flex:1}}>{h.name}</Text>
+  {h.habitDirection==='quit'&&(
+    <View style={{backgroundColor:C.dangerPale,borderRadius:99,paddingHorizontal:8,paddingVertical:2}}>
+      <Text style={{fontSize:9,color:C.danger,fontWeight:'800'}}>QUIT HABIT</Text>
+    </View>
+  )}
+</View><Text style={{fontSize:12,color:h.habitDirection==='quit'?C.danger:C.gold,fontWeight:'700'}}>
+  {h.habitDirection==='quit'?`🚫 ${streak}d clean`:`🔥 ${streak}`}
+</Text></View><View style={{height:7,backgroundColor:C.section,borderRadius:99,overflow:'hidden',marginVertical:6}}><View style={{height:'100%',width:`${r7}%`,backgroundColor:h.color||C.primary,borderRadius:99}}/></View><Text style={{fontSize:11,color:C.textSub}}>7d: {r7}% · 30d: {r30}%{totalHabitMin>0?` · ⏱️ ${(totalHabitMin/60).toFixed(1)}h`:''}</Text></View></View>);
         })}
       </View>
     </ScrollView>
@@ -1074,7 +1123,7 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}){
     const status=logs[key]?.[habit.id];
     days.push({key,date:d.getDate(),done:status===true,notdone:status==='notdone',isToday:i===0,remark});
   }
-  const remarkDays=days.filter(d=>d.remark&&(d.done||d.notdone)).slice(0,10);
+ const remarkDays=days.filter(d=>d.remark&&(d.done||d.notdone)).reverse().slice(0,10);
   return(
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:60}}>
       <LinearGradient colors={[color,color+'BB']} style={[st.screenHeader,{alignItems:'center'}]} start={{x:0,y:0}} end={{x:1,y:1}}>
