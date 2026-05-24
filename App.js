@@ -237,7 +237,7 @@ function DateSelector({selectedDate,onSelectDate}){
     </ScrollView>
   );
 }
-function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,setRemarks,setHabits,onAddHabit,onHabitDetail}){
+function HomeScreen({habits,logs,moods,user,remarks,todos,todoLogs,setTodos,setTodoLogs,setUser,setLogs,setMoods,setRemarks,setHabits,onAddHabit,onHabitDetail}){
   const [selectedDate,setSelectedDate]=useState(getTodayKey());
   const today=getTodayKey();
   const selDate=new Date(selectedDate+'T00:00:00');
@@ -256,6 +256,9 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
   const todayMood=moods[selectedDate]||null;
   const info=getLevelInfo(user.xp);
   const pct=active.length>0?Math.round((done/active.length)*100):0;
+  const [expandedHabit,setExpandedHabit]=useState(null);
+const [newTaskText,setNewTaskText]=useState('');
+const [addingTaskFor,setAddingTaskFor]=useState(null);
   const [remarkModal,setRemarkModal]=useState(false);
   const [remarkHabit,setRemarkHabit]=useState(null);
   const barAnim=useRef(new Animated.Value(0)).current;
@@ -291,6 +294,46 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
   const saveRemark=async(remark)=>{if(!remarkHabit)return;const key=`${selectedDate}_${remarkHabit.id}`;const nr={...remarks,[key]:remark};setRemarks(nr);await Store.set('remarks',nr);};
   const setMood=async(v)=>{Haptics.selectionAsync();const nm={...moods,[selectedDate]:v};setMoods(nm);await Store.set('moods',nm);};
   const reorder=async(newHabits)=>{setHabits(newHabits);await Store.set('habits',newHabits);};
+const toggleTodoLog=async(habitId,todoId)=>{
+  Haptics.selectionAsync();
+  const key=getTodayKey();
+  const nl={...todoLogs};
+  if(!nl[key])nl[key]={};
+  nl[key][todoId]=!nl[key][todoId];
+  setTodoLogs(nl);
+  await Store.set('todologs',nl);
+};
+
+const addTodo=async(habitId)=>{
+  if(!newTaskText.trim())return;
+  const nt={id:`t_${Date.now()}`,text:newTaskText.trim(),pinned:false};
+  const nh={...todos,[habitId]:[...(todos[habitId]||[]),nt]};
+  setTodos(nh);
+  await Store.set('todos',nh);
+  setNewTaskText('');
+  setAddingTaskFor(null);
+};
+
+const togglePin=async(habitId,todoId)=>{
+  Haptics.selectionAsync();
+  const nh={...todos,[habitId]:(todos[habitId]||[]).map(t=>t.id===todoId?{...t,pinned:!t.pinned}:t)};
+  setTodos(nh);
+  await Store.set('todos',nh);
+};
+
+const deleteTodo=async(habitId,todoId)=>{
+  const nh={...todos,[habitId]:(todos[habitId]||[]).filter(t=>t.id!==todoId)};
+  setTodos(nh);
+  await Store.set('todos',nh);
+};
+
+const getHabitTodos=(habitId)=>{
+  const today=getTodayKey();
+  const all=todos[habitId]||[];
+  // Show pinned always + today's non-pinned (non-pinned added today based on id timestamp)
+  return all;
+};
+  
   return(
     <Animated.View style={{flex:1,opacity:fadeAnim}}>
     <ScrollView style={{flex:1,backgroundColor:C.bg}} showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:100}}>
@@ -412,8 +455,13 @@ const handleMeasurableTap=async()=>{
                 <TouchableOpacity onLongPress={()=>{Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);Alert.alert('↕️ Move Habit',`Move "${h.name}" to:`,[...habits.map((_,j)=>j!==i?{text:`Position ${j+1} — ${habits[j].name}`,onPress:()=>{const arr=[...habits];const[item]=arr.splice(i,1);arr.splice(j,0,item);reorder(arr);}}:null).filter(Boolean),{text:'Cancel',style:'cancel'}]);}} style={st.habitIconWrap}>
                   <Text style={{fontSize:24}}>{isNotDone?'❌':h.icon}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>onHabitDetail(h)}>
-                  <Text style={[st.habitName,isNotDone&&{textDecorationLine:'line-through',opacity:0.7}]}>{h.name}</Text>
+                <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>setExpandedHabit(expandedHabit===h.id?null:h.id)}>
+                  <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
+  <Text style={[st.habitName,isNotDone&&{textDecorationLine:'line-through',opacity:0.7}]}>{h.name}</Text>
+  {(todos[h.id]||[]).length>0&&(
+    <Text style={{color:'rgba(255,255,255,0.7)',fontSize:11}}>{expandedHabit===h.id?'▲':'▼'}</Text>
+  )}
+</View>
                   <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:4}}>
                     {streak>0&&!isNotDone&&<Text style={st.habitStreak}>🔥 {streak}d</Text>}
                     {isNotDone&&<Text style={{fontSize:11,color:'rgba(255,255,255,0.80)',fontWeight:'700'}}>❌ Not done</Text>}
@@ -442,10 +490,60 @@ const handleMeasurableTap=async()=>{
     </View>
   </TouchableOpacity>
 )}
-              </Animated.View>
-            </View>
-          </View>
-        );
+             </Animated.View>
+</View>
+{/* Todo list expanded section */}
+{expandedHabit===h.id&&(
+  <View style={{backgroundColor:C.card,borderBottomLeftRadius:20,borderBottomRightRadius:20,paddingHorizontal:14,paddingBottom:12,marginTop:-10,paddingTop:16,borderWidth:1.5,borderTopWidth:0,borderColor:C.border}}>
+    {(todos[h.id]||[]).length===0&&addingTaskFor!==h.id&&(
+      <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:8}}>No tasks yet. Tap + to add one.</Text>
+    )}
+    {(todos[h.id]||[]).map(todo=>{
+      const todayKey=getTodayKey();
+      const checked=todoLogs[todayKey]?.[todo.id]||false;
+      return(
+        <View key={todo.id} style={{flexDirection:'row',alignItems:'center',paddingVertical:6,gap:8}}>
+          <TouchableOpacity onPress={()=>toggleTodoLog(h.id,todo.id)}
+            style={{width:22,height:22,borderRadius:6,borderWidth:1.5,borderColor:checked?h.color||C.primary:C.border,backgroundColor:checked?h.color||C.primary:'transparent',alignItems:'center',justifyContent:'center'}}>
+            {checked&&<Text style={{color:'#fff',fontSize:12,fontWeight:'900'}}>✓</Text>}
+          </TouchableOpacity>
+          <Text style={{flex:1,fontSize:14,color:checked?C.textMuted:C.text,textDecorationLine:checked?'line-through':'none',fontWeight:'500'}}>{todo.text}</Text>
+          <TouchableOpacity onPress={()=>togglePin(h.id,todo.id)}>
+            <Text style={{fontSize:14,opacity:todo.pinned?1:0.3}}>📌</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={()=>deleteTodo(h.id,todo.id)}>
+            <Text style={{fontSize:12,color:C.danger,fontWeight:'700'}}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    })}
+    {addingTaskFor===h.id?(
+      <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:6}}>
+        <TextInput
+          style={{flex:1,backgroundColor:C.section,borderRadius:10,borderWidth:1.5,borderColor:C.primary,paddingHorizontal:12,paddingVertical:8,color:C.text,fontSize:14}}
+          value={newTaskText} onChangeText={setNewTaskText}
+          placeholder="Task name…" placeholderTextColor={C.textMuted}
+          autoFocus maxLength={60}
+          onSubmitEditing={()=>addTodo(h.id)}
+        />
+        <TouchableOpacity onPress={()=>addTodo(h.id)}
+          style={{backgroundColor:C.primary,borderRadius:10,paddingHorizontal:12,paddingVertical:8}}>
+          <Text style={{color:'#fff',fontWeight:'800',fontSize:13}}>Add</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={()=>{setAddingTaskFor(null);setNewTaskText('');}}>
+          <Text style={{color:C.danger,fontWeight:'700',fontSize:13}}>✕</Text>
+        </TouchableOpacity>
+      </View>
+    ):(
+      <TouchableOpacity onPress={()=>setAddingTaskFor(h.id)}
+        style={{flexDirection:'row',alignItems:'center',gap:6,marginTop:6}}>
+        <Text style={{color:C.primary,fontWeight:'700',fontSize:13}}>+ Add task</Text>
+      </TouchableOpacity>
+    )}
+  </View>
+)}
+</View>
+);
       })}
       <View style={{alignItems:'center',paddingVertical:32,paddingHorizontal:16}}>
         <Text style={{fontSize:28,marginBottom:8}}>🌴</Text>
@@ -1035,12 +1133,15 @@ export default function App(){
   const [user,setUser]=useState({xp:0,name:'Champion'});
   const [goals,setGoals]=useState([]);
   const [remarks,setRemarks]=useState({});
+  const [todos,setTodos]=useState({});
+const [todoLogs,setTodoLogs]=useState({});
   const [editHabit,setEditHabit]=useState(null);
   const [detailHabit,setDetailHabit]=useState(null);
   const [tab,setTab]=useState('home');
   useEffect(()=>{
     setupNotifications();
-    Promise.all([Store.get('habits',[]),Store.get('logs',{}),Store.get('moods',{}),Store.get('user',{xp:0,name:'Champion'}),Store.get('goals',[]),Store.get('remarks',{}),Store.get('onboarded',false)]).then(([h,l,m,u,g,r,onboarded])=>{setHabits(h);setLogs(l);setMoods(m);setUser(u);setGoals(g);setRemarks(r);if(!onboarded)setShowOnboarding(true);});
+    Promise.all([Store.get('habits',[]),Store.get('logs',{}),Store.get('moods',{}),Store.get('user',{xp:0,name:'Champion'}),Store.get('goals',[]),Store.get('remarks',{}) Store.get('todos',{}),
+Store.get('todologs',{}),Store.get('onboarded',false)]).then(([h,l,m,u,g,r,onboarded,td,tl])=>{setHabits(h);setLogs(l);setMoods(m);setUser(u);setGoals(g);setRemarks(r);setTodos(td);setTodoLogs(tl);if(!onboarded)setShowOnboarding(true);});
   },[]);
   useEffect(()=>{
     const handler=BackHandler.addEventListener('hardwareBackPress',()=>{
@@ -1060,7 +1161,7 @@ export default function App(){
     if(screen==='habitDetail'&&detailHabit)return(<HabitDetailScreen habit={detailHabit} logs={logs} remarks={remarks} onBack={()=>{setScreen('main');setDetailHabit(null);}} onEdit={()=>{setEditHabit(detailHabit);setScreen('addHabit');}} onDelete={()=>deleteHabit(detailHabit.id)}/>);
     return(
       <View style={{flex:1}}>
-        {tab==='home'&&(<HomeScreen habits={habits} logs={logs} moods={moods} user={user} remarks={remarks} setUser={setUser} setLogs={setLogs} setMoods={setMoods} setRemarks={setRemarks} setHabits={setHabits} onAddHabit={()=>{setEditHabit(null);setScreen('addHabit');}} onHabitDetail={(h)=>{setDetailHabit(h);setScreen('habitDetail');}}/>)}
+        {tab==='home'&&(<HomeScreen habits={habits} logs={logs} moods={moods} user={user} remarks={remarks} todos={todos} todoLogs={todoLogs} setTodos={setTodos} setTodoLogs={setTodoLogs} setUser={setUser} setLogs={setLogs} setMoods={setMoods} setRemarks={setRemarks} setHabits={setHabits} onAddHabit={()=>{setEditHabit(null);setScreen('addHabit');}} onHabitDetail={(h)=>{setDetailHabit(h);setScreen('habitDetail');}}/>)}
         {tab==='stats'&&<StatsScreen habits={habits} logs={logs} moods={moods} onMonthly={()=>setShowMonthly(true)}/>}
         {tab==='goals'&&<GoalsScreen goals={goals} setGoals={setGoals}/>}
         {tab==='profile'&&<ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods} setHabits={setHabits} setLogs={setLogs} setMoods={setMoods}/>}
