@@ -837,7 +837,28 @@ function StatsScreen({habits,logs,moods,onMonthly}){
             <ScrollView ref={matrixRef} horizontal showsHorizontalScrollIndicator={false}>
               <View>
                 <View style={{flexDirection:'row',height:40,alignItems:'flex-end',paddingBottom:4}}>{dayKeys.map(dk=>(<View key={dk.key} style={[{width:36,alignItems:'center'},dk.isToday&&{backgroundColor:C.primaryPale,borderRadius:6}]}><Text style={{fontSize:8,color:dk.isToday?C.primary:C.textMuted,fontWeight:'700'}}>{dk.label}</Text><Text style={{fontSize:11,color:dk.isToday?C.primary:C.textSub,fontWeight:dk.isToday?'900':'700'}}>{dk.date}</Text></View>))}</View>
-                {habits.map(h=>(<View key={h.id} style={{flexDirection:'row',height:36,alignItems:'center',borderBottomWidth:1,borderBottomColor:C.border}}>{dayKeys.map(dk=>{const status=logs[dk.key]?.[h.id];const done=status===true;const notdone=status==='notdone';return(<View key={dk.key} style={{width:36,alignItems:'center'}}><View style={[{width:24,height:24,borderRadius:6,alignItems:'center',justifyContent:'center'},{backgroundColor:done?(h.color||C.primary):notdone?C.danger+'44':C.section},dk.isToday&&!done&&!notdone&&{borderWidth:1.5,borderColor:C.primary+'50'}]}>{done&&<Text style={{fontSize:12,color:'#fff',fontWeight:'900'}}>✓</Text>}{notdone&&<Text style={{fontSize:12,color:C.danger,fontWeight:'900'}}>✕</Text>}</View></View>);})}</View>))}
+                {habits.map(h=>(<View key={h.id} style={{flexDirection:'row',height:36,alignItems:'center',borderBottomWidth:1,borderBottomColor:C.border}}>{dayKeys.map(dk=>{
+  const status=logs[dk.key]?.[h.id];
+  const isMeas=h.habitType==='measurable';
+  const done=isMeas
+    ?(typeof status==='number'&&(h.dailyTarget?status>=h.dailyTarget:status>0))
+    :status===true;
+  const notdone=status==='notdone';
+  const measCount=isMeas&&typeof status==='number'?status:null;
+  const cellColor=done?(h.color||C.primary):notdone?C.danger+'44':C.section;
+  return(
+    <View key={dk.key} style={{width:36,alignItems:'center'}}>
+      <View style={[{width:24,height:24,borderRadius:6,alignItems:'center',justifyContent:'center'},{backgroundColor:cellColor},dk.isToday&&!done&&!notdone&&{borderWidth:1.5,borderColor:C.primary+'50'}]}>
+        {isMeas&&measCount!==null&&measCount>0
+          ?<Text style={{fontSize:9,color:done?'#fff':C.textSub,fontWeight:'900'}}>{measCount>=1000?`${(measCount/1000).toFixed(1)}k`:measCount}</Text>
+          :done?<Text style={{fontSize:12,color:'#fff',fontWeight:'900'}}>✓</Text>
+          :notdone?<Text style={{fontSize:12,color:C.danger,fontWeight:'900'}}>✕</Text>
+          :null
+        }
+      </View>
+    </View>
+  );
+})}</View>))}
               </View>
             </ScrollView>
           </View>
