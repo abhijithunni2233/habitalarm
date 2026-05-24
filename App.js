@@ -1,3 +1,4 @@
+import Svg,{Circle} from 'react-native-svg';
 import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler } from 'react-native';
@@ -301,14 +302,38 @@ function HomeScreen({habits,logs,moods,user,remarks,setUser,setLogs,setMoods,set
         </View>
       </View>
       <View style={{paddingHorizontal:16,marginBottom:16}}>
-        <View style={st.progressCard}>
-          <View style={st.ringWrap}><View style={[st.ring,{borderColor:pct===100?C.success:C.primary}]}><Text style={[st.ringPct,{color:pct===100?C.success:C.primary}]}>{pct}%</Text><Text style={st.ringLbl}>done</Text></View></View>
-          <View style={{flex:1}}>
-            <Text style={st.progressTitle}>Progress</Text>
-            <Text style={st.progressSub}>{done} of {active.length} habits</Text>
-            {pct===100&&active.length>0&&<View style={st.allDone}><Text style={st.allDoneTxt}>🎉 All done!</Text></View>}
-          </View>
+       <View style={st.progressCard}>
+  <View style={st.ringWrap}>
+    {(()=>{
+      const size=80,stroke=7,r=(size-stroke)/2,circ=2*Math.PI*r;
+      const arc=circ*(1-(pct/100));
+      const ringColor=pct===100?C.success:C.primary;
+      const Svg=require('react-native-svg').Svg;
+      const Circle=require('react-native-svg').Circle;
+      return(
+        <View style={{width:size,height:size,alignItems:'center',justifyContent:'center'}}>
+          <Svg width={size} height={size} style={{position:'absolute'}}>
+            <Circle cx={size/2} cy={size/2} r={r} stroke={C.section} strokeWidth={stroke} fill="none"/>
+            <Circle cx={size/2} cy={size/2} r={r} stroke={ringColor} strokeWidth={stroke} fill="none"
+              strokeDasharray={`${circ} ${circ}`}
+              strokeDashoffset={arc}
+              strokeLinecap="round"
+              rotation="-90"
+              origin={`${size/2},${size/2}`}
+            />
+          </Svg>
+          <Text style={[st.ringPct,{color:ringColor}]}>{pct}%</Text>
+          <Text style={st.ringLbl}>done</Text>
         </View>
+      );
+    })()}
+  </View>
+  <View style={{flex:1}}>
+    <Text style={st.progressTitle}>Progress</Text>
+    <Text style={st.progressSub}>{done} of {active.length} habits</Text>
+    {pct===100&&active.length>0&&<View style={st.allDone}><Text style={st.allDoneTxt}>🎉 All done!</Text></View>}
+  </View>
+</View>
       </View>
       <View style={{paddingHorizontal:16,marginBottom:16}}>
         <Text style={st.secTitle}>How are you feeling?</Text>
