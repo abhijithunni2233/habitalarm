@@ -1,19 +1,20 @@
 {
   "expo": {
-    "name": "HabitAlarm",
-    "slug": "habitalarm",
-    "version": "1.0.0",
+    "name": "Hadbit",
+    "slug": "hadbit",
+    "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
-      "package": "in.xspare.habitalarm",
+      "package": "in.xspare.hadbit",
       "adaptiveIcon": {
         "backgroundColor": "#6C3CE1"
       },
       "jsEngine": "jsc"
     },
     "plugins": [
-      "expo-notifications"
+      "expo-notifications",
+      "expo-av"
     ]
   }
 }
