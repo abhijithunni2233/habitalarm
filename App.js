@@ -1,5 +1,4 @@
 import Svg,{Circle} from 'react-native-svg';
-import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -29,27 +28,13 @@ async function cancelHabitAlarms(habitId) {
   try{const all=await Notifications.getAllScheduledNotificationsAsync();for(const n of all){if(n.identifier.startsWith(`habit_${habitId}`))await Notifications.cancelScheduledNotificationAsync(n.identifier);}}catch(e){}
 }
 async function playTick(){
-  try{
-    await Audio.setAudioModeAsync({playsInSilentModeIOS:true});
-    const{sound}=await Audio.Sound.createAsync(
-     {uri:'https://actions.google.com/sounds/v1/rpg/level_up.ogg'},
-      {shouldPlay:true,volume:1.0}
-    );
-    sound.setOnPlaybackStatusUpdate(status=>{
-      if(status.didJustFinish) sound.unloadAsync();
-    });
-  }catch(e){}
+  try{await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);}catch(e){}
 }
 async function playApplause(){
   try{
-    await Audio.setAudioModeAsync({playsInSilentModeIOS:true});
-    const{sound}=await Audio.Sound.createAsync(
-     {uri:'https://actions.google.com/sounds/v1/rpg/all_intro_enter_1.ogg'},
-      {shouldPlay:true,volume:1.0}
-    );
-    sound.setOnPlaybackStatusUpdate(status=>{
-      if(status.didJustFinish) sound.unloadAsync();
-    });
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setTimeout(()=>Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),150);
+    setTimeout(()=>Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),300);
   }catch(e){}
 }
 const C={bg:'#F0EEFF',card:'#FFFFFF',section:'#EAE6FF',border:'#E2DCF8',primary:'#6C3CE1',primaryLight:'#8B5CF6',primaryPale:'#EDE9FF',text:'#1A1040',textSub:'#6B6490',textMuted:'#B0A8CC',success:'#06D6A0',successPale:'#E6FBF5',danger:'#FF6B6B',dangerPale:'#FFF0F0',gold:'#F4A021',goldPale:'#FFF7E6',mood1:'#FF6B6B',mood2:'#FF8C42',mood3:'#FFD93D',mood4:'#8BCE6C',mood5:'#06D6A0',palette:['#4F8EF7','#FF8C42','#9B5DE5','#FF6B9D','#06D6A0','#F4A021','#4CC9F0','#F72585','#43AA8B','#E76F51']};
@@ -82,6 +67,7 @@ const QUOTES=[
   {text:"🧠 Fact: Walking 30 min a day reduces heart disease risk by 35%.",author:"WHO"},
   {text:"🧠 Fact: Drinking water first thing boosts metabolism by 24%.",author:"Health Research"},
   {text:"🧠 Fact: Sleep deprivation affects performance like being drunk.",author:"Sleep Foundation"},
+  {text:"മനുഷ്യനെ മനുഷ്യനായി കാണാൻ പഠിക്കുന്നിടത്താണ് മനുഷ്യത്വം വളരുക, അതാണ് ഏറ്റവും നല്ല ഒരു കഴിവ്.",author:"അഭിജിത് പൊയ്യ"},
 ];
 const LEVELS=[{level:1,xp:0,title:'Beginner'},{level:2,xp:100,title:'Apprentice'},{level:3,xp:250,title:'Practitioner'},{level:4,xp:500,title:'Journeyman'},{level:5,xp:900,title:'Expert'},{level:6,xp:1400,title:'Master'},{level:7,xp:2000,title:'Champion'},{level:8,xp:3000,title:'Legend'},{level:9,xp:5000,title:'Mythic'},{level:10,xp:8000,title:'Transcendent'}];
 function getLevelInfo(xp){let current=LEVELS[0],next=LEVELS[1];for(let i=LEVELS.length-1;i>=0;i--){if(xp>=LEVELS[i].xp){current=LEVELS[i];next=LEVELS[i+1]||null;break;}}return{current,next,progress:next?(xp-current.xp)/(next.xp-current.xp):1};}
@@ -294,6 +280,19 @@ const [addingTaskFor,setAddingTaskFor]=useState(null);
   const saveRemark=async(remark)=>{if(!remarkHabit)return;const key=`${selectedDate}_${remarkHabit.id}`;const nr={...remarks,[key]:remark};setRemarks(nr);await Store.set('remarks',nr);};
   const setMood=async(v)=>{Haptics.selectionAsync();const nm={...moods,[selectedDate]:v};setMoods(nm);await Store.set('moods',nm);};
   const reorder=async(newHabits)=>{setHabits(newHabits);await Store.set('habits',newHabits);};
+const getDailyTodos=(habitId)=>{
+  const key=getTodayKey();
+  const all=todos[habitId]||[];
+  // Non-pinned tasks: only show if created today
+  return all.filter(t=>{
+    if(t.pinned) return true;
+    // Check if task was created today by comparing date from id timestamp
+    const createdDate=new Date(parseInt(t.id.replace('t_','')));
+    const createdKey=`${createdDate.getFullYear()}-${String(createdDate.getMonth()+1).padStart(2,'0')}-${String(createdDate.getDate()).padStart(2,'0')}`;
+    return createdKey===key;
+  });
+};
+
 const toggleTodoLog=async(habitId,todoId)=>{
   Haptics.selectionAsync();
   const key=getTodayKey();
@@ -302,16 +301,13 @@ const toggleTodoLog=async(habitId,todoId)=>{
   nl[key][todoId]=!nl[key][todoId];
   setTodoLogs(nl);
   await Store.set('todologs',nl);
-
-  // Check if all todos for this habit are now completed
-  const habitTodos=todos[habitId]||[];
+  const habitTodos=getDailyTodos(habitId);
   if(habitTodos.length>0){
     const allDone=habitTodos.every(t=>nl[key][t.id]===true);
     const logs2={...logs};
     if(!logs2[key])logs2[key]={};
     const wasAlreadyDone=logs2[key][habitId]===true;
     if(allDone&&!wasAlreadyDone){
-      // Mark habit as done
       logs2[key][habitId]=true;
       const newXp=user.xp+10;
       const nu={...user,xp:newXp};
@@ -319,7 +315,6 @@ const toggleTodoLog=async(habitId,todoId)=>{
       await Store.set('logs',logs2);
       await Store.set('user',nu);
       playTick();
-      // Check if all active habits done
       const activeHabits=habits.filter(h=>!h.restDays?.includes(new Date().getDay()));
       const newDone=activeHabits.filter(h=>{
         const tl=logs2[key]?.[h.id];
@@ -333,7 +328,6 @@ const toggleTodoLog=async(habitId,todoId)=>{
         setTimeout(()=>playApplause(),300);
       }
     } else if(!allDone&&wasAlreadyDone){
-      // Unmark habit if a todo is unchecked
       logs2[key][habitId]=false;
       const newXp=Math.max(0,user.xp-10);
       const nu={...user,xp:newXp};
@@ -343,7 +337,6 @@ const toggleTodoLog=async(habitId,todoId)=>{
     }
   }
 };
-
 const addTodo=async(habitId)=>{
   if(!newTaskText.trim())return;
   const nt={id:`t_${Date.now()}`,text:newTaskText.trim(),pinned:false};
@@ -504,9 +497,9 @@ const getHabitTodos=(habitId)=>{
               <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>setExpandedHabit(expandedHabit===h.id?null:h.id)}>
                 <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
                   <Text style={[st.habitName,isNotDone&&{textDecorationLine:'line-through',opacity:0.7}]}>{h.name}</Text>
-                  {(todos[h.id]||[]).length>0&&(
-                    <Text style={{color:'rgba(255,255,255,0.7)',fontSize:11}}>{expandedHabit===h.id?'▲':'▼'}</Text>
-                  )}
+                  {getDailyTodos(h.id).length>0&&(
+  <Text style={{color:'rgba(255,255,255,0.7)',fontSize:11}}>{expandedHabit===h.id?'▲':'▼'}</Text>
+)}
                 </View>
                 <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:4}}>
                   {isMeasurable&&(
@@ -549,10 +542,10 @@ const getHabitTodos=(habitId)=>{
                 style={{flexDirection:'row',alignItems:'center',justifyContent:'flex-end',marginBottom:8}}>
                 <Text style={{fontSize:12,color:C.primary,fontWeight:'700'}}>View Details →</Text>
               </TouchableOpacity>
-              {(todos[h.id]||[]).length===0&&addingTaskFor!==h.id&&(
-                <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:8}}>No tasks yet. Tap + to add one.</Text>
-              )}
-              {(todos[h.id]||[]).map(todo=>{
+             {getDailyTodos(h.id).length===0&&addingTaskFor!==h.id&&(
+  <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:8}}>No tasks yet. Tap + to add one.</Text>
+)}
+{getDailyTodos(h.id).map(todo=>{
                 const todayKey=getTodayKey();
                 const checked=todoLogs[todayKey]?.[todo.id]||false;
                 return(
@@ -1186,7 +1179,7 @@ function HabitDetailScreen({habit,logs,remarks,onBack,onEdit,onDelete}){
   );
 }
 export default function App(){
-  const [showSplash,setShowSplash]=useState(true);
+  const [showSplash,setShowSplash]=useState(false);
   const [showOnboarding,setShowOnboarding]=useState(false);
   const [showMonthly,setShowMonthly]=useState(false);
   const [screen,setScreen]=useState('main');
