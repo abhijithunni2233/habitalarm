@@ -1,6 +1,4 @@
 import Svg,{Circle} from 'react-native-svg';
-import DraggableFlatList,{ScaleDecorator} from 'react-native-draggable-flatlist';
-import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler } from 'react-native';
@@ -442,15 +440,10 @@ const getHabitTodos=(habitId)=>{
       </View>
       <View style={{paddingHorizontal:16,marginBottom:8}}>
         <Text style={st.secTitle}>Habits</Text>
-    <Text style={{fontSize:11,color:C.textMuted,marginTop:-6}}>Hold & drag icon to reorder · Swipe left for ❌ not done</Text>
+    <Text style={{fontSize:11,color:C.textMuted,marginTop:-6}}>Long-press icon to reorder · Swipe left if you FUCKED-UP</Text>
       </View>
       {habits.length===0&&(<TouchableOpacity onPress={onAddHabit} style={st.empty}><Text style={{fontSize:52}}>🌱</Text><Text style={st.emptyTitle}>No habits yet!</Text><Text style={st.emptySub}>Tap + to add your first habit</Text></TouchableOpacity>)}
-<DraggableFlatList
-  data={habits}
-  keyExtractor={h=>h.id}
-  onDragEnd={({data})=>reorder(data)}
-  scrollEnabled={false}
-  renderItem={({item:h,drag,isActive})=>{
+{habits.map((h)=>{
     const i=habits.indexOf(h);
     const status=logs[selectedDate]?.[h.id];
     const isCompleted=status===true;
@@ -498,15 +491,14 @@ const getHabitTodos=(habitId)=>{
       toggle(h);
     };
     return(
-      <ScaleDecorator>
-        <View style={{paddingHorizontal:16,marginBottom:10,opacity:isActive?0.85:1}}>
+        <View key={h.id} style={{paddingHorizontal:16,marginBottom:10}}>
           <View style={{position:'relative'}}>
             <View style={{position:'absolute',right:0,top:0,bottom:0,width:80,backgroundColor:C.danger,borderRadius:20,alignItems:'center',justifyContent:'center'}}>
               <Text style={{fontSize:24}}>❌</Text>
               <Text style={{fontSize:10,color:'#fff',fontWeight:'700'}}>Not done</Text>
             </View>
             <Animated.View {...panResponder.panHandlers} style={[st.habitCard,{backgroundColor:isNotDone?'#888':bg,opacity:isNotDone?0.7:1},{transform:[{translateX:swipeX},{scale:scaleAnim}]}]}>
-              <TouchableOpacity onLongPress={drag} delayLongPress={200} style={st.habitIconWrap}>
+             <TouchableOpacity onLongPress={()=>{Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);Alert.alert('↕️ Move Habit',`Move "${h.name}" to:`,[...habits.map((_,j)=>j!==i?{text:`Position ${j+1} — ${habits[j].name}`,onPress:()=>{const arr=[...habits];const[item]=arr.splice(i,1);arr.splice(j,0,item);reorder(arr);}}:null).filter(Boolean),{text:'Cancel',style:'cancel'}]);}} style={st.habitIconWrap}>
                 <Text style={{fontSize:24}}>{isNotDone?'❌':h.icon}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>setExpandedHabit(expandedHabit===h.id?null:h.id)}>
@@ -605,10 +597,8 @@ const getHabitTodos=(habitId)=>{
             </View>
           )}
         </View>
-      </ScaleDecorator>
     );
-  }}
-/>
+ })}
       <View style={{alignItems:'center',paddingVertical:32,paddingHorizontal:16}}>
         <Text style={{fontSize:28,marginBottom:8}}>🌴</Text>
         <Text style={{fontSize:13,color:C.textMuted,fontWeight:'600'}}>Crafted with ❤️ in Kerala, India</Text>
@@ -1244,7 +1234,7 @@ Store.get('todologs',{}),Store.get('onboarded',false)]).then(([h,l,m,u,g,r,td,tl
       </View>
     );
   };
-  return(<GestureHandlerRootView style={{flex:1}}><View style={{flex:1,backgroundColor:C.bg}}><StatusBar style="dark"/>{renderScreen()}</View></GestureHandlerRootView>);
+  return(<View style={{flex:1,backgroundColor:C.bg}}><StatusBar style="dark"/>{renderScreen()}</View>);
 }
 const st=StyleSheet.create({
   header:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',paddingHorizontal:16,paddingTop:56,paddingBottom:16},
