@@ -1,4 +1,6 @@
 import Svg,{Circle} from 'react-native-svg';
+import DraggableFlatList,{ScaleDecorator} from 'react-native-draggable-flatlist';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler } from 'react-native';
@@ -440,155 +442,173 @@ const getHabitTodos=(habitId)=>{
       </View>
       <View style={{paddingHorizontal:16,marginBottom:8}}>
         <Text style={st.secTitle}>Habits</Text>
-        <Text style={{fontSize:11,color:C.textMuted,marginTop:-6}}>Long-press icon to reorder · Swipe left for ❌ not done</Text>
+    <Text style={{fontSize:11,color:C.textMuted,marginTop:-6}}>Hold & drag icon to reorder · Swipe left for ❌ not done</Text>
       </View>
       {habits.length===0&&(<TouchableOpacity onPress={onAddHabit} style={st.empty}><Text style={{fontSize:52}}>🌱</Text><Text style={st.emptyTitle}>No habits yet!</Text><Text style={st.emptySub}>Tap + to add your first habit</Text></TouchableOpacity>)}
-      {habits.map((h,i)=>{
-        const status=logs[selectedDate]?.[h.id];
-        const isCompleted=status===true;
-        const isNotDone=status==='notdone';
-        const isRest=!!h.restDays?.includes(dayIdx);
-        const streak=getStreak(logs,h.id);
-        const bg=h.color||C.palette[0];
-        const remark=remarks[`${selectedDate}_${h.id}`];
-        const swipeX=useRef(new Animated.Value(0)).current;
-        const scaleAnim=useRef(new Animated.Value(1)).current;
-        const panResponder=PanResponder.create({
-          onMoveShouldSetPanResponder:(_,gs)=>Math.abs(gs.dx)>10&&Math.abs(gs.dy)<30,
-          onPanResponderMove:(_,gs)=>{if(gs.dx<0)swipeX.setValue(gs.dx);},
-          onPanResponderRelease:(_,gs)=>{
-            if(gs.dx<-80){Animated.timing(swipeX,{toValue:-100,duration:150,useNativeDriver:true}).start(()=>{toggle(h,true);Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();});}
-            else{Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();}
-          },
-        });
-const isMeasurable=h.habitType==='measurable';
-const todayLog=logs[selectedDate]?.[h.id];
-const measurableCount=isMeasurable&&typeof todayLog==='number'?todayLog:0;
-const measurableTarget=h.dailyTarget||null;
-const measurableIncrement=h.increment||1;
-const measurablePct=measurableTarget?Math.min(measurableCount/measurableTarget,1):(measurableCount>0?1:0);
-const handleMeasurableTap=async()=>{
-  if(isRest)return;
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  const nl={...logs};if(!nl[selectedDate])nl[selectedDate]={};
-  const prev=typeof nl[selectedDate][h.id]==='number'?nl[selectedDate][h.id]:0;
-  const next=prev+measurableIncrement;
-  nl[selectedDate][h.id]=next;
-  const wasDone=measurableTarget?prev>=measurableTarget:prev>0;
-  const nowDone=measurableTarget?next>=measurableTarget:next>0;
-  const xpDelta=(!wasDone&&nowDone)?10:0;
-  const nu={...user,xp:Math.max(0,user.xp+xpDelta)};
-  setLogs(nl);setUser(nu);
-  await Store.set('logs',nl);await Store.set('user',nu);
-  if(!wasDone&&nowDone){playTick();}
-};
-        
-        const handleCheck=()=>{if(isRest)return;Animated.sequence([Animated.spring(scaleAnim,{toValue:0.92,useNativeDriver:true}),Animated.spring(scaleAnim,{toValue:1,useNativeDriver:true,tension:200})]).start();toggle(h);};
-        return(
-          <View key={h.id} style={{paddingHorizontal:16,marginBottom:10}}>
-            <View style={{position:'relative'}}>
-              <View style={{position:'absolute',right:0,top:0,bottom:0,width:80,backgroundColor:C.danger,borderRadius:20,alignItems:'center',justifyContent:'center'}}>
-                <Text style={{fontSize:24}}>❌</Text>
-                <Text style={{fontSize:10,color:'#fff',fontWeight:'700'}}>Not done</Text>
-              </View>
-              <Animated.View {...panResponder.panHandlers} style={[st.habitCard,{backgroundColor:isNotDone?'#888':bg,opacity:isNotDone?0.7:1},{transform:[{translateX:swipeX},{scale:scaleAnim}]}]}>
-                <TouchableOpacity onLongPress={()=>{Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);Alert.alert('↕️ Move Habit',`Move "${h.name}" to:`,[...habits.map((_,j)=>j!==i?{text:`Position ${j+1} — ${habits[j].name}`,onPress:()=>{const arr=[...habits];const[item]=arr.splice(i,1);arr.splice(j,0,item);reorder(arr);}}:null).filter(Boolean),{text:'Cancel',style:'cancel'}]);}} style={st.habitIconWrap}>
-                  <Text style={{fontSize:24}}>{isNotDone?'❌':h.icon}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>setExpandedHabit(expandedHabit===h.id?null:h.id)}>
-                  <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
-  <Text style={[st.habitName,isNotDone&&{textDecorationLine:'line-through',opacity:0.7}]}>{h.name}</Text>
-  {(todos[h.id]||[]).length>0&&(
-    <Text style={{color:'rgba(255,255,255,0.7)',fontSize:11}}>{expandedHabit===h.id?'▲':'▼'}</Text>
-  )}
-</View>
-                  <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:4}}>
-                    {streak>0&&!isNotDone&&<Text style={st.habitStreak}>🔥 {streak}d</Text>}
-                    {isNotDone&&<Text style={{fontSize:11,color:'rgba(255,255,255,0.80)',fontWeight:'700'}}>❌ Not done</Text>}
-                    {h.alarms?.length>0&&<Text style={st.habitAlarm}>⏰ {fmtAlarm(h.alarms[0])}</Text>}
-                    {h.duration>0&&<Text style={st.habitAlarm}>⏱️ {h.duration}min</Text>}
-                    {isRest&&<Text style={st.habitRest}>😴 Rest</Text>}
-                 {remark&&<Text style={st.habitRemark}>{remark.emoji}{remark.note?' · '+remark.note:''}</Text>}
-</View>
-{isMeasurable&&measurableTarget&&(
-  <View style={{height:4,backgroundColor:'rgba(255,255,255,0.25)',borderRadius:99,marginTop:6,overflow:'hidden'}}>
-    <View style={{height:'100%',width:`${measurablePct*100}%`,backgroundColor:'#fff',borderRadius:99}}/>
-  </View>
-)}
-</TouchableOpacity>
+<DraggableFlatList
+  data={habits}
+  keyExtractor={h=>h.id}
+  onDragEnd={({data})=>reorder(data)}
+  scrollEnabled={false}
+  renderItem={({item:h,drag,isActive})=>{
+    const i=habits.indexOf(h);
+    const status=logs[selectedDate]?.[h.id];
+    const isCompleted=status===true;
+    const isNotDone=status==='notdone';
+    const isRest=!!h.restDays?.includes(dayIdx);
+    const streak=getStreak(logs,h.id);
+    const bg=h.color||C.palette[0];
+    const remark=remarks[`${selectedDate}_${h.id}`];
+    const isMeasurable=h.habitType==='measurable';
+    const todayLog=logs[selectedDate]?.[h.id];
+    const measurableCount=isMeasurable&&typeof todayLog==='number'?todayLog:0;
+    const measurableTarget=h.dailyTarget||null;
+    const measurableIncrement=h.increment||1;
+    const measurablePct=measurableTarget?Math.min(measurableCount/measurableTarget,1):(measurableCount>0?1:0);
+    const swipeX=useRef(new Animated.Value(0)).current;
+    const scaleAnim=useRef(new Animated.Value(1)).current;
+    const panResponder=PanResponder.create({
+      onMoveShouldSetPanResponder:(_,gs)=>Math.abs(gs.dx)>10&&Math.abs(gs.dy)<30,
+      onPanResponderMove:(_,gs)=>{if(gs.dx<0)swipeX.setValue(gs.dx);},
+      onPanResponderRelease:(_,gs)=>{
+        if(gs.dx<-80){Animated.timing(swipeX,{toValue:-100,duration:150,useNativeDriver:true}).start(()=>{toggle(h,true);Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();});}
+        else{Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();}
+      },
+    });
+    const handleMeasurableTap=async()=>{
+      if(isRest)return;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const nl={...logs};if(!nl[selectedDate])nl[selectedDate]={};
+      const prev=typeof nl[selectedDate][h.id]==='number'?nl[selectedDate][h.id]:0;
+      const next=prev+measurableIncrement;
+      nl[selectedDate][h.id]=next;
+      const wasDone=measurableTarget?prev>=measurableTarget:prev>0;
+      const nowDone=measurableTarget?next>=measurableTarget:next>0;
+      const xpDelta=(!wasDone&&nowDone)?10:0;
+      const nu={...user,xp:Math.max(0,user.xp+xpDelta)};
+      setLogs(nl);setUser(nu);
+      await Store.set('logs',nl);await Store.set('user',nu);
+      if(!wasDone&&nowDone){playTick();}
+    };
+    const handleCheck=()=>{
+      if(isRest)return;
+      const habitTodos=todos[h.id]||[];
+      if(habitTodos.length>0)return;
+      Animated.sequence([Animated.spring(scaleAnim,{toValue:0.92,useNativeDriver:true}),Animated.spring(scaleAnim,{toValue:1,useNativeDriver:true,tension:200})]).start();
+      toggle(h);
+    };
+    return(
+      <ScaleDecorator>
+        <View style={{paddingHorizontal:16,marginBottom:10,opacity:isActive?0.85:1}}>
+          <View style={{position:'relative'}}>
+            <View style={{position:'absolute',right:0,top:0,bottom:0,width:80,backgroundColor:C.danger,borderRadius:20,alignItems:'center',justifyContent:'center'}}>
+              <Text style={{fontSize:24}}>❌</Text>
+              <Text style={{fontSize:10,color:'#fff',fontWeight:'700'}}>Not done</Text>
+            </View>
+            <Animated.View {...panResponder.panHandlers} style={[st.habitCard,{backgroundColor:isNotDone?'#888':bg,opacity:isNotDone?0.7:1},{transform:[{translateX:swipeX},{scale:scaleAnim}]}]}>
+              <TouchableOpacity onLongPress={drag} delayLongPress={200} style={st.habitIconWrap}>
+                <Text style={{fontSize:24}}>{isNotDone?'❌':h.icon}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{flex:1,marginLeft:10}} onPress={()=>setExpandedHabit(expandedHabit===h.id?null:h.id)}>
+                <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
+                  <Text style={[st.habitName,isNotDone&&{textDecorationLine:'line-through',opacity:0.7}]}>{h.name}</Text>
+                  {(todos[h.id]||[]).length>0&&(
+                    <Text style={{color:'rgba(255,255,255,0.7)',fontSize:11}}>{expandedHabit===h.id?'▲':'▼'}</Text>
+                  )}
+                </View>
+                <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:4}}>
+                  {isMeasurable&&(
+                    <Text style={st.habitStreak}>{measurableCount}{h.unit||''}{measurableTarget?` / ${measurableTarget}${h.unit||''}`:''}</Text>
+                  )}
+                  {!isMeasurable&&streak>0&&!isNotDone&&<Text style={st.habitStreak}>🔥 {streak}d</Text>}
+                  {isNotDone&&<Text style={{fontSize:11,color:'rgba(255,255,255,0.80)',fontWeight:'700'}}>❌ Not done</Text>}
+                  {h.alarms?.length>0&&<Text style={st.habitAlarm}>⏰ {fmtAlarm(h.alarms[0])}</Text>}
+                  {h.duration>0&&<Text style={st.habitAlarm}>⏱️ {h.duration}min</Text>}
+                  {isRest&&<Text style={st.habitRest}>😴 Rest</Text>}
+                  {remark&&<Text style={st.habitRemark}>{remark.emoji}{remark.note?' · '+remark.note:''}</Text>}
+                </View>
+                {isMeasurable&&measurableTarget&&(
+                  <View style={{height:4,backgroundColor:'rgba(255,255,255,0.25)',borderRadius:99,marginTop:6,overflow:'hidden'}}>
+                    <View style={{height:'100%',width:`${measurablePct*100}%`,backgroundColor:'#fff',borderRadius:99}}/>
+                  </View>
+                )}
+              </TouchableOpacity>
               {isMeasurable&&!isRest&&!isNotDone?(
-  <TouchableOpacity onPress={handleMeasurableTap}
-    style={{backgroundColor:'rgba(255,255,255,0.25)',borderRadius:12,paddingHorizontal:10,paddingVertical:8,alignItems:'center',justifyContent:'center',marginLeft:8}}>
-    <Text style={{color:'#fff',fontWeight:'900',fontSize:13}}>+{measurableIncrement}</Text>
-    <Text style={{color:'rgba(255,255,255,0.80)',fontSize:9,fontWeight:'700'}}>{h.unit||'unit'}</Text>
-  </TouchableOpacity>
-):(
-  <TouchableOpacity onPress={handleCheck} style={st.checkBtn} disabled={isRest}>
-    <View style={[st.check,isCompleted&&st.checkDone,isNotDone&&{backgroundColor:C.danger+'33',borderColor:C.danger}]}>
-      {isCompleted&&<Text style={{fontSize:16,fontWeight:'900',color:bg}}>✓</Text>}
-      {isNotDone&&<Text style={{fontSize:16,fontWeight:'900',color:C.danger}}>✕</Text>}
-    </View>
-  </TouchableOpacity>
-)}
-             </Animated.View>
-</View>
-{/* Todo list expanded section */}
-{expandedHabit===h.id&&(
-<TouchableOpacity onPress={()=>onHabitDetail(h)}
-  style={{flexDirection:'row',alignItems:'center',justifyContent:'flex-end',marginBottom:8}}>
-  <Text style={{fontSize:12,color:C.primary,fontWeight:'700'}}>View Details →</Text>
-</TouchableOpacity>
- style={{backgroundColor:C.card,borderBottomLeftRadius:20,borderBottomRightRadius:20,paddingHorizontal:14,paddingBottom:12,marginTop:-10,paddingTop:16,borderWidth:1.5,borderTopWidth:0,borderColor:C.border}}>
-    {(todos[h.id]||[]).length===0&&addingTaskFor!==h.id&&(
-      <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:8}}>No tasks yet. Tap + to add one.</Text>
-    )}
-    {(todos[h.id]||[]).map(todo=>{
-      const todayKey=getTodayKey();
-      const checked=todoLogs[todayKey]?.[todo.id]||false;
-      return(
-        <View key={todo.id} style={{flexDirection:'row',alignItems:'center',paddingVertical:6,gap:8}}>
-          <TouchableOpacity onPress={()=>toggleTodoLog(h.id,todo.id)}
-            style={{width:22,height:22,borderRadius:6,borderWidth:1.5,borderColor:checked?h.color||C.primary:C.border,backgroundColor:checked?h.color||C.primary:'transparent',alignItems:'center',justifyContent:'center'}}>
-            {checked&&<Text style={{color:'#fff',fontSize:12,fontWeight:'900'}}>✓</Text>}
-          </TouchableOpacity>
-          <Text style={{flex:1,fontSize:14,color:checked?C.textMuted:C.text,textDecorationLine:checked?'line-through':'none',fontWeight:'500'}}>{todo.text}</Text>
-          <TouchableOpacity onPress={()=>togglePin(h.id,todo.id)}>
-            <Text style={{fontSize:14,opacity:todo.pinned?1:0.3}}>📌</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={()=>deleteTodo(h.id,todo.id)}>
-            <Text style={{fontSize:12,color:C.danger,fontWeight:'700'}}>✕</Text>
-          </TouchableOpacity>
+                <TouchableOpacity onPress={handleMeasurableTap}
+                  style={{backgroundColor:'rgba(255,255,255,0.25)',borderRadius:12,paddingHorizontal:10,paddingVertical:8,alignItems:'center',justifyContent:'center',marginLeft:8}}>
+                  <Text style={{color:'#fff',fontWeight:'900',fontSize:13}}>+{measurableIncrement}</Text>
+                  <Text style={{color:'rgba(255,255,255,0.80)',fontSize:9,fontWeight:'700'}}>{h.unit||'unit'}</Text>
+                </TouchableOpacity>
+              ):(
+                !isMeasurable&&(
+                  <TouchableOpacity onPress={handleCheck} style={st.checkBtn} disabled={isRest}>
+                    <View style={[st.check,isCompleted&&st.checkDone,isNotDone&&{backgroundColor:C.danger+'33',borderColor:C.danger}]}>
+                      {isCompleted&&<Text style={{fontSize:16,fontWeight:'900',color:bg}}>✓</Text>}
+                      {isNotDone&&<Text style={{fontSize:16,fontWeight:'900',color:C.danger}}>✕</Text>}
+                    </View>
+                  </TouchableOpacity>
+                )
+              )}
+            </Animated.View>
+          </View>
+          {expandedHabit===h.id&&(
+            <View style={{backgroundColor:C.card,borderBottomLeftRadius:20,borderBottomRightRadius:20,paddingHorizontal:14,paddingBottom:12,marginTop:-10,paddingTop:16,borderWidth:1.5,borderTopWidth:0,borderColor:C.border}}>
+              <TouchableOpacity onPress={()=>onHabitDetail(h)}
+                style={{flexDirection:'row',alignItems:'center',justifyContent:'flex-end',marginBottom:8}}>
+                <Text style={{fontSize:12,color:C.primary,fontWeight:'700'}}>View Details →</Text>
+              </TouchableOpacity>
+              {(todos[h.id]||[]).length===0&&addingTaskFor!==h.id&&(
+                <Text style={{fontSize:12,color:C.textMuted,fontStyle:'italic',marginBottom:8}}>No tasks yet. Tap + to add one.</Text>
+              )}
+              {(todos[h.id]||[]).map(todo=>{
+                const todayKey=getTodayKey();
+                const checked=todoLogs[todayKey]?.[todo.id]||false;
+                return(
+                  <View key={todo.id} style={{flexDirection:'row',alignItems:'center',paddingVertical:6,gap:8}}>
+                    <TouchableOpacity onPress={()=>toggleTodoLog(h.id,todo.id)}
+                      style={{width:22,height:22,borderRadius:6,borderWidth:1.5,borderColor:checked?h.color||C.primary:C.border,backgroundColor:checked?h.color||C.primary:'transparent',alignItems:'center',justifyContent:'center'}}>
+                      {checked&&<Text style={{color:'#fff',fontSize:12,fontWeight:'900'}}>✓</Text>}
+                    </TouchableOpacity>
+                    <Text style={{flex:1,fontSize:14,color:checked?C.textMuted:C.text,textDecorationLine:checked?'line-through':'none',fontWeight:'500'}}>{todo.text}</Text>
+                    <TouchableOpacity onPress={()=>togglePin(h.id,todo.id)}>
+                      <Text style={{fontSize:14,opacity:todo.pinned?1:0.3}}>📌</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={()=>deleteTodo(h.id,todo.id)}>
+                      <Text style={{fontSize:12,color:C.danger,fontWeight:'700'}}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+              {addingTaskFor===h.id?(
+                <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:6}}>
+                  <TextInput
+                    style={{flex:1,backgroundColor:C.section,borderRadius:10,borderWidth:1.5,borderColor:C.primary,paddingHorizontal:12,paddingVertical:8,color:C.text,fontSize:14}}
+                    value={newTaskText} onChangeText={setNewTaskText}
+                    placeholder="Task name…" placeholderTextColor={C.textMuted}
+                    autoFocus maxLength={60}
+                    onSubmitEditing={()=>addTodo(h.id)}
+                  />
+                  <TouchableOpacity onPress={()=>addTodo(h.id)}
+                    style={{backgroundColor:C.primary,borderRadius:10,paddingHorizontal:12,paddingVertical:8}}>
+                    <Text style={{color:'#fff',fontWeight:'800',fontSize:13}}>Add</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={()=>{setAddingTaskFor(null);setNewTaskText('');}}>
+                    <Text style={{color:C.danger,fontWeight:'700',fontSize:13}}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ):(
+                <TouchableOpacity onPress={()=>setAddingTaskFor(h.id)}
+                  style={{flexDirection:'row',alignItems:'center',gap:6,marginTop:6}}>
+                  <Text style={{color:C.primary,fontWeight:'700',fontSize:13}}>+ Add task</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
-      );
-    })}
-    {addingTaskFor===h.id?(
-      <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:6}}>
-        <TextInput
-          style={{flex:1,backgroundColor:C.section,borderRadius:10,borderWidth:1.5,borderColor:C.primary,paddingHorizontal:12,paddingVertical:8,color:C.text,fontSize:14}}
-          value={newTaskText} onChangeText={setNewTaskText}
-          placeholder="Task name…" placeholderTextColor={C.textMuted}
-          autoFocus maxLength={60}
-          onSubmitEditing={()=>addTodo(h.id)}
-        />
-        <TouchableOpacity onPress={()=>addTodo(h.id)}
-          style={{backgroundColor:C.primary,borderRadius:10,paddingHorizontal:12,paddingVertical:8}}>
-          <Text style={{color:'#fff',fontWeight:'800',fontSize:13}}>Add</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={()=>{setAddingTaskFor(null);setNewTaskText('');}}>
-          <Text style={{color:C.danger,fontWeight:'700',fontSize:13}}>✕</Text>
-        </TouchableOpacity>
-      </View>
-    ):(
-      <TouchableOpacity onPress={()=>setAddingTaskFor(h.id)}
-        style={{flexDirection:'row',alignItems:'center',gap:6,marginTop:6}}>
-        <Text style={{color:C.primary,fontWeight:'700',fontSize:13}}>+ Add task</Text>
-      </TouchableOpacity>
-    )}
-  </View>
-)}
-</View>
-);
-      })}
+      </ScaleDecorator>
+    );
+  }}
+/>
       <View style={{alignItems:'center',paddingVertical:32,paddingHorizontal:16}}>
         <Text style={{fontSize:28,marginBottom:8}}>🌴</Text>
         <Text style={{fontSize:13,color:C.textMuted,fontWeight:'600'}}>Crafted with ❤️ in Kerala, India</Text>
@@ -1194,7 +1214,7 @@ const [todoLogs,setTodoLogs]=useState({});
   useEffect(()=>{
     setupNotifications();
     Promise.all([Store.get('habits',[]),Store.get('logs',{}),Store.get('moods',{}),Store.get('user',{xp:0,name:'Champion'}),Store.get('goals',[]),Store.get('remarks',{}),Store.get('todos',{}),
-Store.get('todologs',{}),Store.get('onboarded',false)]).then(([h,l,m,u,g,r,onboarded,td,tl])=>{setHabits(h);setLogs(l);setMoods(m);setUser(u);setGoals(g);setRemarks(r);setTodos(td);setTodoLogs(tl);if(!onboarded)setShowOnboarding(true);});
+Store.get('todologs',{}),Store.get('onboarded',false)]).then(([h,l,m,u,g,r,td,tl,onboarded])=>{setHabits(h);setLogs(l);setMoods(m);setUser(u);setGoals(g);setRemarks(r);setTodos(td);setTodoLogs(tl);if(!onboarded)setShowOnboarding(true);});
   },[]);
   useEffect(()=>{
     const handler=BackHandler.addEventListener('hardwareBackPress',()=>{
@@ -1224,7 +1244,7 @@ Store.get('todologs',{}),Store.get('onboarded',false)]).then(([h,l,m,u,g,r,onboa
       </View>
     );
   };
-  return(<View style={{flex:1,backgroundColor:C.bg}}><StatusBar style="dark"/>{renderScreen()}</View>);
+  return(<GestureHandlerRootView style={{flex:1}}><View style={{flex:1,backgroundColor:C.bg}}><StatusBar style="dark"/>{renderScreen()}</View></GestureHandlerRootView>);
 }
 const st=StyleSheet.create({
   header:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',paddingHorizontal:16,paddingTop:56,paddingBottom:16},
