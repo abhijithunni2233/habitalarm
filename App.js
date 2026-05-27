@@ -238,16 +238,16 @@ function HabitCard({h,i,habits,logs,selectedDate,dayIdx,todos,todoLogs,remarks,u
   const measurableTarget=h.dailyTarget||null;
   const measurableIncrement=h.increment||1;
   const measurablePct=measurableTarget?Math.min(measurableCount/measurableTarget,1):(measurableCount>0?1:0);
-  const swipeX=useRef(new Animated.Value(0)).current;
-  const scaleAnim=useRef(new Animated.Value(1)).current;
-  const panResponder=PanResponder.create({
-    onMoveShouldSetPanResponder:(_,gs)=>Math.abs(gs.dx)>10&&Math.abs(gs.dy)<30,
-    onPanResponderMove:(_,gs)=>{if(gs.dx<0)swipeX.setValue(gs.dx);},
-    onPanResponderRelease:(_,gs)=>{
-      if(gs.dx<-80){Animated.timing(swipeX,{toValue:-100,duration:150,useNativeDriver:true}).start(()=>{toggle(h,true);Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();});}
-      else{Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();}
-    },
-  });
+ const swipeX=useRef(new Animated.Value(0)).current;
+const scaleAnim=useRef(new Animated.Value(1)).current;
+const panResponder=useRef(PanResponder.create({
+  onMoveShouldSetPanResponder:(_,gs)=>Math.abs(gs.dx)>10&&Math.abs(gs.dy)<30,
+  onPanResponderMove:(_,gs)=>{if(gs.dx<0)swipeX.setValue(gs.dx);},
+  onPanResponderRelease:(_,gs)=>{
+    if(gs.dx<-80){Animated.timing(swipeX,{toValue:-100,duration:150,useNativeDriver:true}).start(()=>{toggle(h,true);Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();});}
+    else{Animated.spring(swipeX,{toValue:0,useNativeDriver:true}).start();}
+  },
+})).current;
   const handleMeasurableTap=async()=>{
     if(isRest)return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
