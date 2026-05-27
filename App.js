@@ -705,7 +705,7 @@ const getHabitTodos=(habitId)=>{
       <View style={{alignItems:'center',paddingVertical:32,paddingHorizontal:16}}>
         <Text style={{fontSize:28,marginBottom:8}}>🌴</Text>
         <Text style={{fontSize:13,color:C.textMuted,fontWeight:'600'}}>Crafted with ❤️ in Kerala, India</Text>
-        <Text style={{fontSize:11,color:C.border,marginTop:4}}>HabitAlarm © {new Date().getFullYear()}</Text>
+      <Text style={{fontSize:11,color:C.border,marginTop:4}}>HADBIT © {new Date().getFullYear()}</Text>
       </View>
       <RemarkModal visible={remarkModal} habitName={remarkHabit?.name||''} habitColor={remarkHabit?.color} existingRemark={remarkHabit?remarks[`${selectedDate}_${remarkHabit.id}`]:null} onSave={saveRemark} onClose={()=>{setRemarkModal(false);setRemarkHabit(null);}}/>
     </ScrollView>
