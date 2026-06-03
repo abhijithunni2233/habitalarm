@@ -86,7 +86,7 @@ async function playTick() {
 async function playApplause() {
   try {
     const { sound } = await Audio.Sound.createAsync(
-      require('./assets/tick.mp3')
+      require('./assets/applause.mp3')
     );
     await sound.playAsync();
     sound.setOnPlaybackStatusUpdate(status => {
