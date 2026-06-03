@@ -576,16 +576,18 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
     if (!wasDone && nowDone) { playTick(); }
   };
 
-  const handleCheck = () => {
-    if (isRest) return;
-    const habitTodos = todos[h.id] || [];
-    if (habitTodos.length > 0) return;
-    Animated.sequence([
-      Animated.spring(scaleAnim, { toValue: 0.92, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 200 }),
-    ]).start();
-    toggle(h);
-  };
+ const handleCheck = () => {
+  if (isRest) return;
+  const todayKey = getTodayKey();
+  const habitTodos = getDailyTodos(h.id);
+  const allTodosDone = habitTodos.length === 0 || habitTodos.every(t => todoLogs[todayKey]?.[t.id] === true);
+  if (!allTodosDone) return; // block only if todos exist AND are incomplete
+  Animated.sequence([
+    Animated.spring(scaleAnim, { toValue: 0.92, useNativeDriver: true }),
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 200 }),
+  ]).start();
+  toggle(h);
+};
 
   const todayKey = getTodayKey();
 
@@ -638,12 +640,18 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
             </TouchableOpacity>
           ) : (
             !isMeasurable && (
-              <TouchableOpacity onPress={handleCheck} style={st.checkBtn} disabled={isRest}>
-                <View style={[st.check, isCompleted && st.checkDone, isNotDone && { backgroundColor: C.danger + '33', borderColor: C.danger }]}>
-                  {isCompleted && <Text style={{ fontSize: 16, fontWeight: '900', color: bg }}>✓</Text>}
-                  {isNotDone && <Text style={{ fontSize: 16, fontWeight: '900', color: C.danger }}>✕</Text>}
-                </View>
-              </TouchableOpacity>
+             // AFTER
+<TouchableOpacity 
+  onPress={handleCheck} 
+  style={st.checkBtn} 
+  disabled={isRest}
+  onStartShouldSetResponder={() => true}
+>
+  <View style={[st.check, isCompleted && st.checkDone, isNotDone && { backgroundColor: C.danger + '33', borderColor: C.danger }]}>
+    {isCompleted && <Text style={{ fontSize: 16, fontWeight: '900', color: bg }}>✓</Text>}
+    {isNotDone && <Text style={{ fontSize: 16, fontWeight: '900', color: C.danger }}>✕</Text>}
+  </View>
+</TouchableOpacity>
             )
           )}
         </Animated.View>
