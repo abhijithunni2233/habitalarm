@@ -1,3 +1,4 @@
+import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
@@ -72,15 +73,25 @@ async function cancelHabitAlarms(habitId) {
 
 async function playTick() {
   try {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const { sound } = await Audio.Sound.createAsync(
+      require('./assets/tick.mp3')
+    );
+    await sound.playAsync();
+    sound.setOnPlaybackStatusUpdate(status => {
+      if (status.didJustFinish) sound.unloadAsync();
+    });
   } catch (e) {}
 }
 
 async function playApplause() {
   try {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success), 150);
-    setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success), 300);
+    const { sound } = await Audio.Sound.createAsync(
+      require('./assets/tick.mp3')
+    );
+    await sound.playAsync();
+    sound.setOnPlaybackStatusUpdate(status => {
+      if (status.didJustFinish) sound.unloadAsync();
+    });
   } catch (e) {}
 }
 
