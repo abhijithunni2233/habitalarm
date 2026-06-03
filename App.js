@@ -794,17 +794,16 @@ function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTo
     await Store.set('habits', newHabits);
   };
 
-  const getDailyTodos = (habitId) => {
-    const key = getTodayKey();
-    const all = (todos && todos[habitId]) || [];
-    return all.filter(t => {
-      if (t.pinned) return true;
-      const createdDate = new Date(parseInt(t.id.replace('t_', '')));
-      const createdKey = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}-${String(createdDate.getDate()).padStart(2, '0')}`;
-      return createdKey === key;
-    });
-  };
-
+ // AFTER
+const getDailyTodos = (habitId) => {
+  const all = (todos && todos[habitId]) || [];
+  return all.filter(t => {
+    if (t.pinned) return true;
+    const createdDate = new Date(parseInt(t.id.replace('t_', '')));
+    const createdKey = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}-${String(createdDate.getDate()).padStart(2, '0')}`;
+    return createdKey === selectedDate;  // ← selectedDate instead of key
+  });
+};
   const toggleTodoLog = async (habitId, todoId) => {
     Haptics.selectionAsync();
     const key = getTodayKey();
