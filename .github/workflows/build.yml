@@ -32,34 +32,11 @@ jobs:
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
 
-      - name: Apply Gradle 8 compatibility patches
-        run: |
-          # Fix 1: expo-av uses deprecated 'classifier' property (removed in Gradle 8)
-          sed -i "s/classifier = 'sources'/archiveClassifier.set('sources')/g" \
-            node_modules/expo-av/android/build.gradle
-          # Fix 2: components.release not yet registered at config time (expo-av + expo-modules-core)
-          sed -i 's/from components\.release/from components.findByName("release")/g' \
-            node_modules/expo-av/android/build.gradle
-          sed -i 's/from components\.release/from components.findByName("release")/g' \
-            node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle
-          # Fix 3: expo-av sets Kotlin jvmTarget to VERSION_11, must match Java 17
-          sed -i 's/jvmTarget = JavaVersion.VERSION_11.majorVersion/jvmTarget = JavaVersion.VERSION_17.majorVersion/g' \
-            node_modules/expo-av/android/build.gradle
-
       - name: Fix Android colors
         run: |
-          cat > android/app/src/main/res/values/colors.xml << 'XMLEOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-            <color name="splashscreen_background">#6C3CE1</color>
-            <color name="colorPrimary">#6C3CE1</color>
-            <color name="colorPrimaryDark">#4A2AA0</color>
-            <color name="colorAccent">#8B5CF6</color>
-            <color name="iconBackground">#6C3CE1</color>
-          </resources>
-          XMLEOF
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n  <color name="splashscreen_background">#6C3CE1</color>\n  <color name="colorPrimary">#6C3CE1</color>\n  <color name="colorPrimaryDark">#4A2AA0</color>\n  <color name="colorAccent">#8B5CF6</color>\n  <color name="iconBackground">#6C3CE1</color>\n</resources>\n' > android/app/src/main/res/values/colors.xml
 
-      - name: Bundle JS manually
+      - name: Bundle JS
         run: |
           mkdir -p android/app/src/main/assets
           npx expo export --platform android --output-dir /tmp/expobundle 2>&1
