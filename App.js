@@ -555,13 +555,22 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
   const swipeX = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
+  const toggleRef = useRef(toggle);
+  const selectedDateRef = useRef(selectedDate);
+  toggleRef.current = toggle;
+  selectedDateRef.current = selectedDate;
+
   const panResponder = useRef(PanResponder.create({
     onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 10 && Math.abs(gs.dy) < 30,
     onPanResponderMove: (_, gs) => { if (gs.dx < 0) swipeX.setValue(gs.dx); },
     onPanResponderRelease: (_, gs) => {
       if (gs.dx < -80) {
+        if (selectedDateRef.current !== getTodayKey()) {
+          Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start();
+          return;
+        }
         Animated.timing(swipeX, { toValue: -100, duration: 150, useNativeDriver: true }).start(() => {
-          toggle(h, true);
+          toggleRef.current(h, true);
           Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start();
         });
       } else {
@@ -590,9 +599,11 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
  const handleCheck = () => {
   if (isRest) return;
   const todayKey = getTodayKey();
-  const habitTodos = getDailyTodos(h.id);
-  const allTodosDone = habitTodos.length === 0 || habitTodos.every(t => todoLogs[todayKey]?.[t.id] === true);
-  if (!allTodosDone) return; // block only if todos exist AND are incomplete
+  if (selectedDate === todayKey) {
+    const habitTodos = getDailyTodos(h.id);
+    const allTodosDone = habitTodos.length === 0 || habitTodos.every(t => todoLogs[todayKey]?.[t.id] === true);
+    if (!allTodosDone) return;
+  }
   Animated.sequence([
     Animated.spring(scaleAnim, { toValue: 0.92, useNativeDriver: true }),
     Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 200 }),
@@ -1870,7 +1881,7 @@ function HabitDetailScreen({ habit, logs, remarks, onBack, onEdit, onDelete }) {
 }
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showMonthly, setShowMonthly] = useState(false);
   const [screen, setScreen] = useState('main');
