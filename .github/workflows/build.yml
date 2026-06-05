@@ -44,6 +44,10 @@ jobs:
             sed -i 's/from components\.release/from components.findByName("release")/g' "$f" || true
           done
 
+      - name: Fix Kotlin JVM target mismatch (expo-av uses 11, Java is 17)
+        run: |
+          echo "kotlin.jvm.target.validation.mode=IGNORE" >> android/gradle.properties
+
       - name: Fix Android colors
         run: |
           cat > android/app/src/main/res/values/colors.xml << 'XMLEOF'
