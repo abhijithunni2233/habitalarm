@@ -32,10 +32,16 @@ jobs:
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
 
-      - name: Patch expo-modules-core gradle
+      - name: Patch expo-av classifier (Gradle 8 fix)
+        run: |
+          find node_modules/expo-av/android -name "*.gradle" | while read f; do
+            sed -i "s/classifier = 'sources'/archiveClassifier.set('sources')/g" "$f" || true
+          done
+
+      - name: Patch expo-modules-core gradle (Gradle 8 fix)
         run: |
           find node_modules -name "ExpoModulesCorePlugin.gradle" | while read f; do
-            sed -i 's/components.release/components.getByName("release")/g' "$f" || true
+            sed -i 's/from components\.release/from components.findByName("release")/g' "$f" || true
           done
 
       - name: Fix Android colors
