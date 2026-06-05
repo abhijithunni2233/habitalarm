@@ -32,16 +32,12 @@ jobs:
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
 
-      - name: Force Kotlin JVM target 17 for all modules
+      - name: Patch expo-av Kotlin JVM target to 17
         run: |
-          echo "" >> android/build.gradle
-          echo "subprojects {" >> android/build.gradle
-          echo "    afterEvaluate {" >> android/build.gradle
-          echo "        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {" >> android/build.gradle
-          echo "            kotlinOptions { jvmTarget = \"17\" }" >> android/build.gradle
-          echo "        }" >> android/build.gradle
-          echo "    }" >> android/build.gradle
-          echo "}" >> android/build.gradle
+          find node_modules/expo-av/android -name "build.gradle" | while read f; do
+            sed -i 's/jvmTarget = "11"/jvmTarget = "17"/g' "$f" || true
+            sed -i "s/jvmTarget = '11'/jvmTarget = '17'/g" "$f" || true
+          done
 
       - name: Fix Android colors
         run: |
