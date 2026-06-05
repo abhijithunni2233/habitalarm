@@ -24,13 +24,28 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '11'
+          java-version: '17'
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
+
+      - name: Force Kotlin JVM target 17 for all modules
+        run: |
+          cat >> android/build.gradle << 'EOF'
+
+subprojects {
+    afterEvaluate {
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+            kotlinOptions {
+                jvmTarget = "17"
+            }
+        }
+    }
+}
+EOF
 
       - name: Fix Android colors
         run: |
