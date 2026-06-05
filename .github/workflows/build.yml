@@ -24,29 +24,13 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '11'
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
-
-      - name: Patch expo-av classifier (Gradle 8 fix)
-        run: |
-          find node_modules/expo-av/android -name "*.gradle" | while read f; do
-            sed -i "s/classifier = 'sources'/archiveClassifier.set('sources')/g" "$f" || true
-          done
-
-      - name: Patch expo-modules-core gradle (Gradle 8 fix)
-        run: |
-          find node_modules -name "ExpoModulesCorePlugin.gradle" | while read f; do
-            sed -i 's/from components\.release/from components.findByName("release")/g' "$f" || true
-          done
-
-      - name: Fix Kotlin JVM target mismatch (expo-av uses 11, Java is 17)
-        run: |
-          echo "kotlin.jvm.target.validation.mode=IGNORE" >> android/gradle.properties
 
       - name: Fix Android colors
         run: |
