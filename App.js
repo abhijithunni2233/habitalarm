@@ -96,7 +96,7 @@ async function playApplause() {
 }
 
 const C = {
-  bg: '#F0EEFF',
+  bg: '#F4F2FF',
   card: '#FFFFFF',
   section: '#EAE6FF',
   border: '#E2DCF8',
@@ -118,8 +118,6 @@ const C = {
   mood4: '#8BCE6C',
   mood5: '#06D6A0',
   palette: ['#4F8EF7', '#FF8C42', '#9B5DE5', '#FF6B9D', '#06D6A0', '#F4A021', '#4CC9F0', '#F72585', '#43AA8B', '#E76F51'],
-  darkGradient: ['#170B3B', '#1E0D4E', '#0E0628'],
-  accent: '#B4A0FF',
 };
 
 const ICONS = ['💪','🏃','📚','💧','🧘','🎯','💤','🥗','🎵','✍️','🧠','❤️','🌅','🚴','🏋️','🎨','📱','💊','🌿','☕','🦷','🧹','💰','🙏'];
@@ -273,50 +271,50 @@ function generateInsights(habits, logs, moods) {
 
 // ─── BUG FIX: StyleSheet now properly closed with }); ───
 const st = StyleSheet.create({
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 16 },
-  greeting: { fontSize: 22, fontWeight: '900', color: '#fff' },
-  dateTxt: { fontSize: 13, color: 'rgba(255,255,255,0.55)', marginTop: 4 },
-  fab: { borderRadius: 99, overflow: 'hidden', elevation: 8, shadowColor: '#6C3CE1', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 14 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 20, paddingTop: 58, paddingBottom: 8 },
+  greeting: { fontSize: 26, fontWeight: '900', color: C.text },
+  dateTxt: { fontSize: 13, color: C.textMuted, marginTop: 4 },
+  fab: { borderRadius: 99, overflow: 'hidden', elevation: 6, shadowColor: C.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.30, shadowRadius: 12 },
   fabGrad: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   fabTxt: { color: '#fff', fontSize: 28, fontWeight: '700', marginTop: -2 },
-  quoteCard: { borderRadius: 22, padding: 18, minHeight: 110, justifyContent: 'space-between', elevation: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.45, shadowRadius: 24 },
+  quoteCard: { borderRadius: 22, padding: 18, minHeight: 110, justifyContent: 'space-between', elevation: 4, shadowColor: C.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.20, shadowRadius: 16 },
   quoteDecor: { fontSize: 40, color: 'rgba(255,255,255,0.25)', position: 'absolute', top: 4, left: 12 },
   quoteText: { fontSize: 14, color: '#fff', fontWeight: '600', lineHeight: 21, paddingTop: 8 },
   quoteAuthor: { fontSize: 12, color: 'rgba(255,255,255,0.70)', marginTop: 6, fontWeight: '700' },
   quoteDots: { flexDirection: 'row', gap: 4, marginTop: 8 },
   dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.35)' },
   dotActive: { width: 14, backgroundColor: '#fff' },
-  levelStrip: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', elevation: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 16 },
-  levelBadge: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', shadowColor: C.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.7, shadowRadius: 10 },
+  levelStrip: { backgroundColor: C.card, borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', elevation: 2, shadowColor: C.primary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 12, borderWidth: 1, borderColor: C.border },
+  levelBadge: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
   levelNum: { color: '#fff', fontSize: 18, fontWeight: '900' },
-  levelTitle: { fontSize: 13, fontWeight: '800', color: '#fff' },
-  levelXP: { fontSize: 11, color: 'rgba(255,255,255,0.60)' },
-  barBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 99, overflow: 'hidden', marginVertical: 4 },
-  barFill: { height: '100%', backgroundColor: C.primaryLight, borderRadius: 99 },
-  levelNext: { fontSize: 10, color: 'rgba(255,255,255,0.40)' },
-  progressCard: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', elevation: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 16 },
+  levelTitle: { fontSize: 13, fontWeight: '800', color: C.text },
+  levelXP: { fontSize: 11, color: C.textSub },
+  barBg: { height: 6, backgroundColor: C.section, borderRadius: 99, overflow: 'hidden', marginVertical: 4 },
+  barFill: { height: '100%', backgroundColor: C.primary, borderRadius: 99 },
+  levelNext: { fontSize: 10, color: C.textMuted },
+  progressCard: { backgroundColor: C.card, borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16, elevation: 2, shadowColor: C.primary, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 12, borderWidth: 1, borderColor: C.border },
   ringWrap: { width: 80, height: 80, alignItems: 'center', justifyContent: 'center' },
-  ring: { width: 80, height: 80, borderRadius: 40, borderWidth: 7, borderColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  ring: { width: 80, height: 80, borderRadius: 40, borderWidth: 7, borderColor: C.section, alignItems: 'center', justifyContent: 'center' },
   ringPct: { fontSize: 20, fontWeight: '900' },
-  ringLbl: { fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: '600' },
-  progressTitle: { fontSize: 16, fontWeight: '800', color: '#fff' },
-  progressSub: { fontSize: 13, color: 'rgba(255,255,255,0.60)', marginTop: 2 },
-  allDone: { backgroundColor: 'rgba(6,214,160,0.20)', borderRadius: 99, paddingHorizontal: 10, paddingVertical: 4, marginTop: 6, alignSelf: 'flex-start', borderWidth: 1, borderColor: 'rgba(6,214,160,0.40)' },
+  ringLbl: { fontSize: 9, color: C.textSub, fontWeight: '600' },
+  progressTitle: { fontSize: 16, fontWeight: '800', color: C.text },
+  progressSub: { fontSize: 13, color: C.textSub, marginTop: 2 },
+  allDone: { backgroundColor: C.successPale, borderRadius: 99, paddingHorizontal: 10, paddingVertical: 4, marginTop: 6, alignSelf: 'flex-start' },
   allDoneTxt: { fontSize: 12, color: C.success, fontWeight: '700' },
-  moodBtn: { flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.13)', elevation: 0 },
-  habitCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, padding: 16, borderWidth: 1, elevation: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 18 },
-  habitIconWrap: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  habitName: { fontSize: 15, fontWeight: '800', color: '#fff' },
-  habitStreak: { fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
-  habitAlarm: { fontSize: 11, color: 'rgba(255,255,255,0.80)', fontWeight: '600' },
-  habitRest: { fontSize: 11, color: 'rgba(255,255,255,0.70)' },
-  habitRemark: { fontSize: 11, color: 'rgba(255,255,255,0.90)', fontWeight: '600' },
+  moodBtn: { flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: C.border, elevation: 1, shadowColor: C.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  habitCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, padding: 16, backgroundColor: C.card, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 12, borderWidth: 1, borderColor: C.border },
+  habitIconWrap: { width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  habitName: { fontSize: 15, fontWeight: '800', color: C.text },
+  habitStreak: { fontSize: 11, color: C.textSub, fontWeight: '700' },
+  habitAlarm: { fontSize: 11, color: C.textMuted, fontWeight: '600' },
+  habitRest: { fontSize: 11, color: C.textMuted },
+  habitRemark: { fontSize: 11, color: C.textSub, fontWeight: '600' },
   checkBtn: { marginLeft: 10 },
-  check: { width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: 'rgba(255,255,255,0.40)', alignItems: 'center', justifyContent: 'center' },
-  checkDone: { backgroundColor: 'rgba(255,255,255,0.92)', borderColor: 'transparent' },
+  check: { width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
+  checkDone: { borderColor: 'transparent' },
   empty: { alignItems: 'center', paddingVertical: 60 },
-  emptyTitle: { fontSize: 20, fontWeight: '800', color: '#fff', marginBottom: 4, marginTop: 12 },
-  emptySub: { fontSize: 14, color: 'rgba(255,255,255,0.55)' },
+  emptyTitle: { fontSize: 20, fontWeight: '800', color: C.text, marginBottom: 4, marginTop: 12 },
+  emptySub: { fontSize: 14, color: C.textSub },
   screenHeader: { paddingHorizontal: 16, paddingTop: 56, paddingBottom: 30, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, marginBottom: 16 },
   screenHeaderTitle: { fontSize: 28, fontWeight: '900', color: '#fff' },
   screenHeaderSub: { fontSize: 14, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
@@ -527,10 +525,10 @@ function DateSelector({ selectedDate, onSelectDate }) {
       <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 4 }}>
         {dates.map(d => (
           <TouchableOpacity key={d.key} onPress={() => onSelectDate(d.key)}
-            style={[{ width: 56, paddingVertical: 10, borderRadius: 18, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.09)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.13)' }, selectedDate === d.key && { backgroundColor: C.primary, borderColor: C.primary, shadowColor: C.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 8 }, d.isToday && selectedDate !== d.key && { borderColor: C.primaryLight, borderWidth: 1.5 }]}>
-            <Text style={{ fontSize: 10, fontWeight: '700', color: selectedDate === d.key ? '#fff' : 'rgba(255,255,255,0.50)' }}>{d.day}</Text>
-            <Text style={{ fontSize: 19, fontWeight: '900', color: selectedDate === d.key ? '#fff' : 'rgba(255,255,255,0.90)', marginTop: 2 }}>{d.date}</Text>
-            {d.isToday && <Text style={{ fontSize: 8, color: selectedDate === d.key ? 'rgba(255,255,255,0.85)' : C.accent, fontWeight: '700' }}>TODAY</Text>}
+            style={[{ width: 52, paddingVertical: 10, borderRadius: 16, alignItems: 'center', backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border, elevation: 1, shadowColor: C.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6 }, selectedDate === d.key && { backgroundColor: C.primary, borderColor: C.primary, elevation: 4, shadowOpacity: 0.20 }, d.isToday && selectedDate !== d.key && { borderColor: C.primary }]}>
+            <Text style={{ fontSize: 10, fontWeight: '700', color: selectedDate === d.key ? 'rgba(255,255,255,0.80)' : C.textMuted }}>{d.day}</Text>
+            <Text style={{ fontSize: 19, fontWeight: '900', color: selectedDate === d.key ? '#fff' : C.text, marginTop: 2 }}>{d.date}</Text>
+            {d.isToday && <Text style={{ fontSize: 8, color: selectedDate === d.key ? 'rgba(255,255,255,0.85)' : C.primary, fontWeight: '700' }}>TODAY</Text>}
           </TouchableOpacity>
         ))}
       </View>
@@ -622,7 +620,7 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
           <Text style={{ fontSize: 24 }}>❌</Text>
           <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>Not done</Text>
         </View>
-        <Animated.View {...panResponder.panHandlers} style={[st.habitCard, { backgroundColor: isNotDone ? 'rgba(80,80,80,0.18)' : bg + '25', borderColor: isNotDone ? 'rgba(255,255,255,0.10)' : bg + '65', borderLeftWidth: 3.5, borderLeftColor: isNotDone ? 'rgba(255,255,255,0.20)' : bg, opacity: isNotDone ? 0.75 : 1 }, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
+        <Animated.View {...panResponder.panHandlers} style={[st.habitCard, { borderLeftWidth: 4, borderLeftColor: isNotDone ? C.danger : bg, backgroundColor: isNotDone ? '#F9F9F9' : C.card, opacity: isNotDone ? 0.75 : 1 }, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
           <TouchableOpacity
             onLongPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -631,7 +629,7 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
                 { text: 'Cancel', style: 'cancel' },
               ]);
             }}
-            style={[st.habitIconWrap, { backgroundColor: bg + '45' }]}>
+            style={[st.habitIconWrap, { backgroundColor: bg + '22' }]}>
             <Text style={{ fontSize: 24 }}>{isNotDone ? '❌' : h.icon}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ flex: 1, marginLeft: 10 }} onPress={() => setExpandedHabit(expandedHabit === h.id ? null : h.id)}>
@@ -641,14 +639,42 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
                 <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11 }}>{expandedHabit === h.id ? '▲' : '▼'}</Text>
               )}
             </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-              {isMeasurable && (<Text style={st.habitStreak}>{measurableCount}{h.unit || ''}{measurableTarget ? ` / ${measurableTarget}${h.unit || ''}` : ''}</Text>)}
-              {!isMeasurable && streak > 0 && !isNotDone && <Text style={st.habitStreak}>🔥 {streak}d</Text>}
-              {isNotDone && <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.80)', fontWeight: '700' }}>❌ Not done</Text>}
-              {h.alarms?.length > 0 && <Text style={st.habitAlarm}>⏰ {fmtAlarm(h.alarms[0])}</Text>}
-              {h.duration > 0 && <Text style={st.habitAlarm}>⏱️ {h.duration}min</Text>}
-              {isRest && <Text style={st.habitRest}>😴 Rest</Text>}
-              {remark && <Text style={st.habitRemark}>{remark.emoji}{remark.note ? ' · ' + remark.note : ''}</Text>}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+              {isMeasurable && (
+                <View style={{ backgroundColor: bg + '18', borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 11, color: bg, fontWeight: '700' }}>{measurableCount}{h.unit || ''}{measurableTarget ? ` / ${measurableTarget}${h.unit || ''}` : ''}</Text>
+                </View>
+              )}
+              {!isMeasurable && streak > 0 && !isNotDone && (
+                <View style={{ backgroundColor: bg + '18', borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: bg }}>🔥 {streak}d</Text>
+                </View>
+              )}
+              {isNotDone && (
+                <View style={{ backgroundColor: C.dangerPale, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 11, color: C.danger, fontWeight: '700' }}>❌ Not done</Text>
+                </View>
+              )}
+              {h.alarms?.length > 0 && (
+                <View style={{ backgroundColor: C.section, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 11, color: C.textSub, fontWeight: '600' }}>⏰ {fmtAlarm(h.alarms[0])}</Text>
+                </View>
+              )}
+              {h.duration > 0 && (
+                <View style={{ backgroundColor: C.section, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 11, color: C.textSub, fontWeight: '600' }}>⏱️ {h.duration}min</Text>
+                </View>
+              )}
+              {isRest && (
+                <View style={{ backgroundColor: C.section, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 11, color: C.textMuted, fontWeight: '600' }}>😴 Rest</Text>
+                </View>
+              )}
+              {remark && (
+                <View style={{ backgroundColor: C.section, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 11, color: C.textSub, fontWeight: '600' }}>{remark.emoji}{remark.note ? ' · ' + remark.note : ''}</Text>
+                </View>
+              )}
             </View>
             {isMeasurable && measurableTarget && (
               <View style={{ height: 4, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 99, marginTop: 6, overflow: 'hidden' }}>
@@ -671,9 +697,9 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
   disabled={isRest}
   onStartShouldSetResponder={() => true}
 >
-  <View style={[st.check, isCompleted && st.checkDone, isNotDone && { backgroundColor: C.danger + '33', borderColor: C.danger }]}>
-    {isCompleted && <Text style={{ fontSize: 16, fontWeight: '900', color: bg }}>✓</Text>}
-    {isNotDone && <Text style={{ fontSize: 16, fontWeight: '900', color: C.danger }}>✕</Text>}
+  <View style={[st.check, { borderColor: bg + '70' }, isCompleted && [st.checkDone, { backgroundColor: bg }], isNotDone && { backgroundColor: C.dangerPale, borderColor: C.danger }]}>
+    {isCompleted && <Text style={{ fontSize: 15, fontWeight: '900', color: '#fff' }}>✓</Text>}
+    {isNotDone && <Text style={{ fontSize: 14, fontWeight: '900', color: C.danger }}>✕</Text>}
   </View>
 </TouchableOpacity>
             )
@@ -681,22 +707,22 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
         </Animated.View>
       </View>
       {expandedHabit === h.id && (
-        <View style={{ backgroundColor: bg + '18', borderBottomLeftRadius: 20, borderBottomRightRadius: 20, paddingHorizontal: 14, paddingBottom: 12, marginTop: -10, paddingTop: 16, borderWidth: 1, borderTopWidth: 0, borderLeftWidth: 3.5, borderColor: bg + '40', borderLeftColor: bg }}>
+        <View style={{ backgroundColor: bg + '0C', borderBottomLeftRadius: 20, borderBottomRightRadius: 20, paddingHorizontal: 14, paddingBottom: 12, marginTop: -10, paddingTop: 16, borderWidth: 1, borderTopWidth: 0, borderLeftWidth: 4, borderColor: C.border, borderLeftColor: bg }}>
           <TouchableOpacity onPress={() => onHabitDetail(h)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 8 }}>
-            <Text style={{ fontSize: 12, color: C.accent, fontWeight: '700' }}>View Details →</Text>
+            <Text style={{ fontSize: 12, color: C.primary, fontWeight: '700' }}>View Details →</Text>
           </TouchableOpacity>
           {getDailyTodos(h.id).length === 0 && addingTaskFor !== h.id && (
-            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', marginBottom: 8 }}>No tasks yet. Tap + to add one.</Text>
+            <Text style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic', marginBottom: 8 }}>No tasks yet. Tap + to add one.</Text>
           )}
           {getDailyTodos(h.id).map(todo => {
             const checked = todoLogs[todayKey]?.[todo.id] || false;
             return (
               <View key={todo.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 }}>
                 <TouchableOpacity onPress={() => toggleTodoLog(h.id, todo.id)}
-                  style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: checked ? h.color || C.primary : 'rgba(255,255,255,0.30)', backgroundColor: checked ? h.color || C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                  style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: checked ? h.color || C.primary : C.border, backgroundColor: checked ? h.color || C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
                   {checked && <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900' }}>✓</Text>}
                 </TouchableOpacity>
-                <Text style={{ flex: 1, fontSize: 14, color: checked ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.90)', textDecorationLine: checked ? 'line-through' : 'none', fontWeight: '500' }}>{todo.text}</Text>
+                <Text style={{ flex: 1, fontSize: 14, color: checked ? C.textMuted : C.text, textDecorationLine: checked ? 'line-through' : 'none', fontWeight: '500' }}>{todo.text}</Text>
                 <TouchableOpacity onPress={() => togglePin(h.id, todo.id)}>
                   <Text style={{ fontSize: 14, opacity: todo.pinned ? 1 : 0.3 }}>📌</Text>
                 </TouchableOpacity>
@@ -709,7 +735,7 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
           {addingTaskFor === h.id ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
               <TextInput
-                style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 10, borderWidth: 1.5, borderColor: C.primaryLight, paddingHorizontal: 12, paddingVertical: 8, color: '#fff', fontSize: 14 }}
+                style={{ flex: 1, backgroundColor: C.section, borderRadius: 10, borderWidth: 1.5, borderColor: C.primary, paddingHorizontal: 12, paddingVertical: 8, color: C.text, fontSize: 14 }}
                 value={newTaskText} onChangeText={setNewTaskText}
                 placeholder="Task name…" placeholderTextColor={C.textMuted}
                 autoFocus maxLength={60}
@@ -724,7 +750,7 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
             </View>
           ) : (
             <TouchableOpacity onPress={() => setAddingTaskFor(h.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-              <Text style={{ color: C.accent, fontWeight: '700', fontSize: 13 }}>+ Add task</Text>
+              <Text style={{ color: C.primary, fontWeight: '700', fontSize: 13 }}>+ Add task</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -899,15 +925,14 @@ const getDailyTodos = (habitId) => {
   // SVG ring
   const size = 80, stroke = 7, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
   const arc = circ * (1 - (pct / 100));
-  const ringColor = pct === 100 ? C.success : C.accent;
+  const ringColor = pct === 100 ? C.success : C.primary;
 
   return (
     <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-      <LinearGradient colors={C.darkGradient} style={{ flex: 1 }}>
-      <ScrollView style={{ flex: 1, backgroundColor: 'transparent' }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         <View style={st.header}>
           <View>
-            <Text style={st.greeting}>Good <Text style={{ color: C.accent }}>{greeting}</Text></Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: C.textSub }}>Good {greeting}</Text>
             <Text style={st.greeting}>{user.name} 👋</Text>
             <Text style={st.dateTxt}>{getDateStr(selectedDate)}</Text>
           </View>
@@ -945,7 +970,7 @@ const getDailyTodos = (habitId) => {
             <View style={st.ringWrap}>
               <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
                 <Svg width={size} height={size} style={{ position: 'absolute' }}>
-                  <Circle cx={size / 2} cy={size / 2} r={r} stroke='rgba(255,255,255,0.12)' strokeWidth={stroke} fill="none" />
+                  <Circle cx={size / 2} cy={size / 2} r={r} stroke={C.section} strokeWidth={stroke} fill="none" />
                   <Circle cx={size / 2} cy={size / 2} r={r} stroke={ringColor} strokeWidth={stroke} fill="none"
                     strokeDasharray={`${circ} ${circ}`}
                     strokeDashoffset={arc}
@@ -966,18 +991,18 @@ const getDailyTodos = (habitId) => {
           </View>
         </View>
         <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-          <Text style={[st.secTitle, { color: '#fff' }]}>How are you feeling?</Text>
+          <Text style={st.secTitle}>How are you feeling?</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
             {[{ v: 1, e: '😞', c: C.mood1 }, { v: 2, e: '😕', c: C.mood2 }, { v: 3, e: '😐', c: C.mood3 }, { v: 4, e: '🙂', c: C.mood4 }, { v: 5, e: '😄', c: C.mood5 }].map(m => (
-              <TouchableOpacity key={m.v} onPress={() => setMood(m.v)} style={[st.moodBtn, todayMood === m.v && { backgroundColor: m.c + '33', borderColor: m.c, borderWidth: 1.5 }]}>
+              <TouchableOpacity key={m.v} onPress={() => setMood(m.v)} style={[st.moodBtn, todayMood === m.v && { backgroundColor: m.c + '22', borderColor: m.c, borderWidth: 1.5 }]}>
                 <Text style={{ fontSize: 24 }}>{m.e}</Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
         <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-          <Text style={[st.secTitle, { color: '#fff' }]}>Habits</Text>
-          <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: -6 }}>Long-press icon to reorder · Swipe left to mark not done</Text>
+          <Text style={st.secTitle}>Habits</Text>
+          <Text style={{ fontSize: 11, color: C.textMuted, marginTop: -6 }}>Long-press icon to reorder · Swipe left to mark not done</Text>
         </View>
         {habits.length === 0 && (
           <TouchableOpacity onPress={onAddHabit} style={st.empty}>
@@ -1003,8 +1028,8 @@ const getDailyTodos = (habitId) => {
         ))}
         <View style={{ alignItems: 'center', paddingVertical: 32, paddingHorizontal: 16 }}>
           <Text style={{ fontSize: 28, marginBottom: 8 }}>🌴</Text>
-          <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.30)', fontWeight: '600' }}>Crafted with ❤️ in Kerala, India</Text>
-          <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.15)', marginTop: 4 }}>HabitAlarm © {new Date().getFullYear()}</Text>
+          <Text style={{ fontSize: 13, color: C.textMuted, fontWeight: '600' }}>Crafted with ❤️ in Kerala, India</Text>
+          <Text style={{ fontSize: 11, color: C.border, marginTop: 4 }}>HabitAlarm © {new Date().getFullYear()}</Text>
         </View>
         <RemarkModal
           visible={remarkModal}
@@ -1015,7 +1040,6 @@ const getDailyTodos = (habitId) => {
           onClose={() => { setRemarkModal(false); setRemarkHabit(null); }}
         />
       </ScrollView>
-      </LinearGradient>
     </Animated.View>
   );
 }
