@@ -34,7 +34,7 @@ jobs:
 
       - name: Fix Android colors
         run: |
-          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n  <color name="splashscreen_background">#6C3CE1</color>\n  <color name="colorPrimary">#6C3CE1</color>\n  <color name="colorPrimaryDark">#4A2AA0</color>\n  <color name="colorAccent">#8B5CF6</color>\n  <color name="iconBackground">#6C3CE1</color>\n</resources>\n' > android/app/src/main/res/values/colors.xml
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n  <color name="splashscreen_background">#6C3CE1</color>\n  <color name="colorPrimary">#6C3CE1</color>\n  <color name="colorPrimaryDark">#4A2AA0</color>\n  <color name="colorAccent">#8B5CF6</color>\n  <color name="iconBackground">#6C3CE1</color>\n  <color name="notification_icon_color">#6C3CE1</color>\n</resources>\n' > android/app/src/main/res/values/colors.xml
 
       - name: Bundle JS
         run: |
