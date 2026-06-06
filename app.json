@@ -3,6 +3,7 @@
     "name": "Hadbit",
     "slug": "hadbit",
     "version": "1.1.0",
+    "scheme": "hadbit",
     "icon": "./assets/hadbit_icon_svg.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -31,7 +32,8 @@
         }
       ],
       "expo-av",
-      "./plugins/withNotificationColor"
+      "./plugins/withNotificationColor",
+      "./plugins/withAlarmActivity"
     ]
   }
 }

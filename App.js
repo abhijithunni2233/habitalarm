@@ -1,6 +1,6 @@
 import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler, Linking } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -99,14 +99,20 @@ async function scheduleAlarm(habit, alarm) {
         id,
         title: isHigh ? `⚡ ${habit.icon} ${habit.name}` : `⏰ ${habit.icon} ${habit.name}`,
         body: isHigh ? 'Your priority habit is calling. Act now!' : 'Time for your habit! Keep the streak going 🔥',
-        data: { habitId: habit.id },
+        data: {
+          habitId: habit.id,
+          habitName: habit.name,
+          habitIcon: habit.icon || '⏰',
+          isHighPriority: isHigh ? 'true' : 'false',
+          streak: '0',
+        },
         android: {
           channelId,
           importance: AndroidImportance.HIGH,
           category: AndroidCategory.ALARM,
           visibility: AndroidVisibility.PUBLIC,
           lightUpScreen: true,
-          fullScreenAction: { id: 'default', launchActivity: 'default' },
+          fullScreenAction: { id: 'default', launchActivity: 'in.xspare.hadbit.AlarmActivity' },
           pressAction: { id: 'default', launchActivity: 'default' },
           actions: [
             { title: '✅ Done Now', pressAction: { id: 'done_now', launchActivity: 'default' } },
@@ -2310,6 +2316,40 @@ export default function App() {
   useEffect(() => { habitsRef.current = habits; }, [habits]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
   useEffect(() => { userRef.current = user; }, [user]);
+
+  // Handle URL scheme callbacks from AlarmActivity (hadbit://alarm?action=done&habitId=xxx)
+  useEffect(() => {
+    async function handleAlarmUrl(url) {
+      if (!url) return;
+      try {
+        const parsed = new URL(url);
+        if (parsed.hostname !== 'alarm') return;
+        const action = parsed.searchParams.get('action');
+        const habitId = parsed.searchParams.get('habitId');
+        if (!habitId || !action) return;
+        const habit = habitsRef.current.find(h => h.id === habitId);
+        if (!habit) return;
+        if (action === 'done') {
+          const todayKey = getTodayKey();
+          if (logsRef.current[todayKey]?.[habitId] === true) return;
+          const nl = { ...logsRef.current };
+          if (!nl[todayKey]) nl[todayKey] = {};
+          nl[todayKey][habitId] = true;
+          const xpEarned = habit.highPriority ? 20 : 10;
+          const nu = { ...userRef.current, xp: userRef.current.xp + xpEarned };
+          setLogs(nl); setUser(nu);
+          await Store.set('logs', nl); await Store.set('user', nu);
+        } else if (action === 'skip') {
+          const nu = { ...userRef.current, xp: Math.max(0, userRef.current.xp - 5) };
+          setUser(nu);
+          await Store.set('user', nu);
+        }
+      } catch (e) {}
+    }
+    Linking.getInitialURL().then(handleAlarmUrl);
+    const sub = Linking.addEventListener('url', ({ url }) => handleAlarmUrl(url));
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     // Foreground event: notification arrives while app is open → show full-screen alarm
