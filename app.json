@@ -30,8 +30,7 @@
           "color": "#6C3CE1"
         }
       ],
-      "expo-av",
-      "@notifee/react-native"
+      "expo-av"
     ]
   }
 }
