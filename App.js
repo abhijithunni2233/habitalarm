@@ -2043,6 +2043,152 @@ function HabitDetailScreen({ habit, logs, remarks, onBack, onEdit, onDelete }) {
   );
 }
 
+function FullScreenAlarmModal({ visible, habitData, onDone, onSkip }) {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const ring3 = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(60)).current;
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const soundRef = useRef(null);
+  const pulseLoop = useRef(null);
+  const ringLoop = useRef(null);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    slideUp.setValue(60);
+    fadeIn.setValue(0);
+    ring1.setValue(0); ring2.setValue(0); ring3.setValue(0);
+    pulseAnim.setValue(1);
+
+    Animated.parallel([
+      Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.spring(slideUp, { toValue: 0, tension: 80, friction: 9, useNativeDriver: true }),
+    ]).start();
+
+    pulseLoop.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.18, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ])
+    );
+    pulseLoop.current.start();
+
+    const launchRing = (anim, delay) => Animated.loop(
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(anim, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.delay(200),
+        Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    ringLoop.current = Animated.parallel([
+      launchRing(ring1, 0),
+      launchRing(ring2, 450),
+      launchRing(ring3, 900),
+    ]);
+    ringLoop.current.start();
+
+    const loadSound = async () => {
+      try {
+        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true });
+        const { sound } = await Audio.Sound.createAsync(
+          require('./assets/tick.mp3'),
+          { isLooping: true, volume: 1.0 }
+        );
+        soundRef.current = sound;
+        await sound.playAsync();
+      } catch (e) {}
+    };
+    loadSound();
+
+    return () => {
+      pulseLoop.current?.stop();
+      ringLoop.current?.stop();
+      if (soundRef.current) {
+        soundRef.current.stopAsync().catch(() => {}).then(() => soundRef.current?.unloadAsync().catch(() => {}));
+        soundRef.current = null;
+      }
+    };
+  }, [visible]);
+
+  const stopAndCall = (cb) => {
+    pulseLoop.current?.stop();
+    ringLoop.current?.stop();
+    if (soundRef.current) {
+      soundRef.current.stopAsync().catch(() => {}).then(() => soundRef.current?.unloadAsync().catch(() => {}));
+      soundRef.current = null;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    cb();
+  };
+
+  if (!habitData) return null;
+  const { habit } = habitData;
+  const isHigh = !!habit.highPriority;
+  const bg1 = isHigh ? '#2D0010' : '#0D0030';
+  const bg2 = isHigh ? '#5C0020' : '#1A0060';
+  const bg3 = isHigh ? '#FF1744' : '#6C3CE1';
+  const ringSize = width * 2.6;
+
+  return (
+    <Modal visible={visible} animationType="none" statusBarTranslucent onRequestClose={() => stopAndCall(onSkip)}>
+      <StatusBar style="light" />
+      <LinearGradient colors={[bg1, bg2, bg3]} style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }}>
+        {[ring1, ring2, ring3].map((r, i) => (
+          <Animated.View key={i} style={{
+            position: 'absolute',
+            width: ringSize, height: ringSize,
+            borderRadius: ringSize / 2,
+            borderWidth: 1.5,
+            borderColor: `rgba(255,255,255,${0.12 - i * 0.03})`,
+            transform: [{ scale: r.interpolate({ inputRange: [0, 1], outputRange: [0.1, 1.1] }) }],
+            opacity: r.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.9, 0.4, 0] }),
+          }} />
+        ))}
+
+        <Animated.View style={{ opacity: fadeIn, transform: [{ translateY: slideUp }], alignItems: 'center', width: '100%', paddingHorizontal: 32 }}>
+          <View style={{ backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 30, padding: 12, marginBottom: 8 }}>
+            <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: '800', letterSpacing: 2, textTransform: 'uppercase' }}>
+              {isHigh ? '⚡ High Priority Alarm' : '⏰ Habit Alarm'}
+            </Text>
+          </View>
+
+          <Animated.View style={{ transform: [{ scale: pulseAnim }], marginBottom: 20 }}>
+            <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.30)' }}>
+              <Text style={{ fontSize: 64 }}>{habit.icon}</Text>
+            </View>
+          </Animated.View>
+
+          <Text style={{ fontSize: 30, fontWeight: '900', color: '#fff', textAlign: 'center', marginBottom: 10, letterSpacing: -0.5 }}>{habit.name}</Text>
+          <Text style={{ fontSize: 15, color: 'rgba(255,255,255,0.70)', textAlign: 'center', marginBottom: 48, fontWeight: '600' }}>
+            {isHigh ? 'Your priority habit is calling. Act now!' : 'Time to build your habit. Keep the streak going! 🔥'}
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => stopAndCall(onDone)}
+            activeOpacity={0.85}
+            style={{ width: '100%', borderRadius: 20, overflow: 'hidden', marginBottom: 14, elevation: 8, shadowColor: '#00D68F', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 14 }}>
+            <LinearGradient colors={['#00C853', '#00A878']} style={{ paddingVertical: 20, alignItems: 'center', borderRadius: 20 }}>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: '#fff', letterSpacing: 0.3 }}>✅  Done Now</Text>
+              {isHigh && <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.80)', marginTop: 3, fontWeight: '700' }}>+20 XP bonus</Text>}
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => stopAndCall(onSkip)}
+            activeOpacity={0.7}
+            style={{ width: '100%', paddingVertical: 16, alignItems: 'center', borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.20)' }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: 'rgba(255,255,255,0.75)' }}>😔  Skip Today</Text>
+            {isHigh && <Text style={{ fontSize: 11, color: 'rgba(255,100,100,0.85)', marginTop: 3, fontWeight: '700' }}>-15 XP</Text>}
+          </TouchableOpacity>
+        </Animated.View>
+      </LinearGradient>
+    </Modal>
+  );
+}
+
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -2060,6 +2206,7 @@ export default function App() {
   const [detailHabit, setDetailHabit] = useState(null);
   const [tab, setTab] = useState('home');
   const [celebration, setCelebration] = useState(null);
+  const [alarmModal, setAlarmModal] = useState(null);
   const habitsRef = useRef([]);
   const logsRef = useRef({});
   const userRef = useRef({ xp: 0, name: 'Champion' });
@@ -2078,7 +2225,19 @@ export default function App() {
       Store.get('onboarded', false),
     ]).then(([h, l, m, u, g, r, td, tl, onboarded]) => {
       setHabits(h); setLogs(l); setMoods(m); setUser(u); setGoals(g); setRemarks(r); setTodos(td); setTodoLogs(tl);
+      habitsRef.current = h;
       if (!onboarded) setShowOnboarding(true);
+      Notifications.getLastNotificationResponseAsync().then((response) => {
+        if (!response) return;
+        const { actionIdentifier, notification } = response;
+        const habitId = notification.request.content.data?.habitId;
+        if (!habitId) return;
+        const habit = h.find(x => x.id === habitId);
+        if (!habit) return;
+        if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+          setAlarmModal({ habit });
+        }
+      });
     });
   }, []);
 
@@ -2096,12 +2255,30 @@ export default function App() {
   useEffect(() => { userRef.current = user; }, [user]);
 
   useEffect(() => {
+    const fgSub = Notifications.addNotificationReceivedListener((notification) => {
+      const habitId = notification.request.content.data?.habitId;
+      if (!habitId) return;
+      const habit = habitsRef.current.find(h => h.id === habitId);
+      if (!habit) return;
+      setAlarmModal({ habit });
+    });
+    return () => fgSub.remove();
+  }, []);
+
+  useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener(async (response) => {
       const { actionIdentifier, notification } = response;
       const habitId = notification.request.content.data?.habitId;
       if (!habitId) return;
       const habit = habitsRef.current.find(h => h.id === habitId);
-      if (!habit || !habit.highPriority) return;
+      if (!habit) return;
+
+      if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+        setAlarmModal({ habit });
+        return;
+      }
+
+      if (!habit.highPriority) return;
       const todayKey = getTodayKey();
       if (actionIdentifier === 'done_now') {
         if (logsRef.current[todayKey]?.[habitId] === true) return;
@@ -2125,6 +2302,35 @@ export default function App() {
     });
     return () => sub.remove();
   }, []);
+
+  const handleAlarmDone = async () => {
+    if (!alarmModal) return;
+    const { habit } = alarmModal;
+    setAlarmModal(null);
+    const todayKey = getTodayKey();
+    if (logsRef.current[todayKey]?.[habit.id] === true) return;
+    const nl = { ...logsRef.current };
+    if (!nl[todayKey]) nl[todayKey] = {};
+    nl[todayKey][habit.id] = true;
+    const xpEarned = habit.highPriority ? 20 : 10;
+    const nu = { ...userRef.current, xp: userRef.current.xp + xpEarned };
+    setLogs(nl); setUser(nu);
+    await Store.set('logs', nl); await Store.set('user', nu);
+    const streak = getStreak(nl, habit.id);
+    playApplause();
+    setCelebration({ habit, streak, xpEarned });
+  };
+
+  const handleAlarmSkip = async () => {
+    if (!alarmModal) return;
+    const { habit } = alarmModal;
+    setAlarmModal(null);
+    if (!habit.highPriority) return;
+    const nu = { ...userRef.current, xp: Math.max(0, userRef.current.xp - 15) };
+    setUser(nu);
+    await Store.set('user', nu);
+    await scheduleFollowUpReminder(habit.name);
+  };
 
   const reloadHabits = async () => { const h = await Store.get('habits', []); setHabits(h); };
   const deleteHabit = (id) => {
@@ -2190,6 +2396,12 @@ export default function App() {
         streak={celebration?.streak || 0}
         xpEarned={celebration?.xpEarned || 20}
         onClose={() => setCelebration(null)}
+      />
+      <FullScreenAlarmModal
+        visible={!!alarmModal}
+        habitData={alarmModal}
+        onDone={handleAlarmDone}
+        onSkip={handleAlarmSkip}
       />
     </View>
   );
