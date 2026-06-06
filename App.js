@@ -9,42 +9,57 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import notifee, {
+  AndroidImportance,
+  AndroidCategory,
+  AndroidVisibility,
+  TriggerType,
+  RepeatFrequency,
+  EventType,
+} from '@notifee/react-native';
 
 const { width } = Dimensions.get('window');
 
+// Keep expo-notifications handler for iOS fallback banners
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
-    priority: Notifications.AndroidNotificationPriority.MAX,
   }),
 });
 
 async function setupNotifications() {
   try {
-    if (!Device.isDevice) return;
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('habit-alarms', {
+      await notifee.createChannel({
+        id: 'habit-alarms',
         name: 'Habit Alarms',
-        importance: Notifications.AndroidImportance.MAX,
+        importance: AndroidImportance.HIGH,
+        vibration: true,
         vibrationPattern: [0, 250, 250, 250],
+        lights: true,
         lightColor: '#6C3CE1',
+        sound: 'default',
       });
-      await Notifications.setNotificationChannelAsync('high-priority-alarms', {
+      await notifee.createChannel({
+        id: 'high-priority-alarms',
         name: 'High Priority Alarms',
-        importance: Notifications.AndroidImportance.MAX,
+        importance: AndroidImportance.HIGH,
+        vibration: true,
         vibrationPattern: [0, 500, 200, 500, 200, 500],
+        lights: true,
         lightColor: '#FF6B6B',
         bypassDnd: true,
+        sound: 'default',
       });
     }
-    await Notifications.setNotificationCategoryAsync('high_priority_habit', [
-      { identifier: 'done_now', buttonTitle: '✅ Done Now', options: { opensAppToForeground: true } },
-      { identifier: 'skip_today', buttonTitle: '😔 Skip Today', options: { opensAppToForeground: true } },
-    ]);
-    const { status } = await Notifications.requestPermissionsAsync();
-    return status === 'granted';
+    await notifee.requestPermission();
+    if (Device.isDevice) {
+      const { status } = await Notifications.requestPermissionsAsync();
+      return status === 'granted';
+    }
+    return true;
   } catch (e) {
     return false;
   }
@@ -55,48 +70,68 @@ async function scheduleFollowUpReminder(habitName) {
     const tonight = new Date();
     tonight.setHours(22, 0, 0, 0);
     if (tonight <= new Date()) return;
-    await Notifications.scheduleNotificationAsync({
-      content: {
+    await notifee.createTriggerNotification(
+      {
         title: '💔 You skipped a priority habit',
         body: `"${habitName}" was skipped today. Show up tomorrow — don't break the chain! 💪`,
-        sound: true,
+        android: { channelId: 'habit-alarms', importance: AndroidImportance.DEFAULT },
+        ios: { sound: 'default' },
       },
-      trigger: { date: tonight, channelId: 'habit-alarms' },
-    });
+      { type: TriggerType.TIMESTAMP, timestamp: tonight.getTime(), alarmManager: { allowWhileIdle: true } }
+    );
   } catch (e) {}
 }
 
 async function scheduleAlarm(habit, alarm) {
   try {
     const id = `habit_${habit.id}_${alarm.hour}_${alarm.minute}`;
-    await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+    await notifee.cancelTriggerNotification(id).catch(() => {});
     const isHigh = !!habit.highPriority;
-    await Notifications.scheduleNotificationAsync({
-      identifier: id,
-      content: {
-        title: isHigh ? `⚡ ${habit.icon} ${habit.name} — High Priority!` : `⏰ ${habit.icon} ${habit.name}`,
-        body: isHigh ? `Your priority habit is calling. Do it now or skip?` : `Time for your habit! Keep the streak going 🔥`,
-        sound: true,
+    const channelId = isHigh ? 'high-priority-alarms' : 'habit-alarms';
+
+    const now = new Date();
+    const trigger = new Date();
+    trigger.setHours(alarm.hour, alarm.minute, 0, 0);
+    if (trigger <= now) trigger.setDate(trigger.getDate() + 1);
+
+    await notifee.createTriggerNotification(
+      {
+        id,
+        title: isHigh ? `⚡ ${habit.icon} ${habit.name}` : `⏰ ${habit.icon} ${habit.name}`,
+        body: isHigh ? 'Your priority habit is calling. Act now!' : 'Time for your habit! Keep the streak going 🔥',
         data: { habitId: habit.id },
-        color: isHigh ? '#FF6B6B' : (habit.color || '#6C3CE1'),
-        ...(isHigh && { categoryIdentifier: 'high_priority_habit' }),
+        android: {
+          channelId,
+          importance: AndroidImportance.HIGH,
+          category: AndroidCategory.ALARM,
+          visibility: AndroidVisibility.PUBLIC,
+          lightUpScreen: true,
+          fullScreenAction: { id: 'default', launchActivity: 'default' },
+          pressAction: { id: 'default', launchActivity: 'default' },
+          actions: [
+            { title: '✅ Done Now', pressAction: { id: 'done_now', launchActivity: 'default' } },
+            { title: '😔 Skip Today', pressAction: { id: 'skip_today', launchActivity: 'default' } },
+          ],
+          color: isHigh ? '#FF6B6B' : (habit.color || '#6C3CE1'),
+        },
+        ios: { sound: 'default', categoryId: 'habit' },
       },
-      trigger: {
-        channelId: isHigh ? 'high-priority-alarms' : 'habit-alarms',
-        hour: alarm.hour,
-        minute: alarm.minute,
-        repeats: true,
-      },
-    });
+      {
+        type: TriggerType.TIMESTAMP,
+        timestamp: trigger.getTime(),
+        repeatFrequency: RepeatFrequency.DAILY,
+        alarmManager: { allowWhileIdle: true },
+      }
+    );
   } catch (e) {}
 }
 
 async function cancelHabitAlarms(habitId) {
   try {
-    const all = await Notifications.getAllScheduledNotificationsAsync();
-    for (const n of all) {
-      if (n.identifier.startsWith(`habit_${habitId}`))
-        await Notifications.cancelScheduledNotificationAsync(n.identifier);
+    const scheduled = await notifee.getTriggerNotifications();
+    for (const { notification } of scheduled) {
+      if (notification.id?.startsWith(`habit_${habitId}`))
+        await notifee.cancelTriggerNotification(notification.id);
     }
   } catch (e) {}
 }
@@ -260,6 +295,31 @@ const Store = {
     try { await AsyncStorage.setItem(key, JSON.stringify(val)); } catch {}
   },
 };
+
+// Handles notification actions when app is killed or in background
+notifee.onBackgroundEvent(async ({ type, detail }) => {
+  const { pressAction, notification } = detail;
+  const habitId = notification?.data?.habitId;
+  if (!habitId) return;
+
+  if (type === EventType.ACTION_PRESS && pressAction?.id === 'done_now') {
+    const [logs, user] = await Promise.all([Store.get('logs', {}), Store.get('user', { xp: 0 })]);
+    const todayKey = getTodayKey();
+    if (logs[todayKey]?.[habitId] === true) return;
+    if (!logs[todayKey]) logs[todayKey] = {};
+    logs[todayKey][habitId] = true;
+    user.xp = (user.xp || 0) + 20;
+    await Promise.all([Store.set('logs', logs), Store.set('user', user)]);
+    await notifee.cancelNotification(notification.id);
+  } else if (type === EventType.ACTION_PRESS && pressAction?.id === 'skip_today') {
+    const [habits, user] = await Promise.all([Store.get('habits', []), Store.get('user', { xp: 0 })]);
+    user.xp = Math.max(0, (user.xp || 0) - 15);
+    await Store.set('user', user);
+    const habit = habits.find(h => h.id === habitId);
+    if (habit) await scheduleFollowUpReminder(habit.name);
+    await notifee.cancelNotification(notification.id);
+  }
+});
 
 // ─── BUG FIX: generateInsights moved BEFORE StyleSheet, as a proper top-level function ───
 function generateInsights(habits, logs, moods) {
@@ -2227,16 +2287,13 @@ export default function App() {
       setHabits(h); setLogs(l); setMoods(m); setUser(u); setGoals(g); setRemarks(r); setTodos(td); setTodoLogs(tl);
       habitsRef.current = h;
       if (!onboarded) setShowOnboarding(true);
-      Notifications.getLastNotificationResponseAsync().then((response) => {
-        if (!response) return;
-        const { actionIdentifier, notification } = response;
-        const habitId = notification.request.content.data?.habitId;
+      // Show alarm modal if app was cold-started by tapping the notification
+      notifee.getInitialNotification().then((initial) => {
+        if (!initial) return;
+        const habitId = initial.notification?.data?.habitId;
         if (!habitId) return;
         const habit = h.find(x => x.id === habitId);
-        if (!habit) return;
-        if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-          setAlarmModal({ habit });
-        }
+        if (habit) setAlarmModal({ habit });
       });
     });
   }, []);
@@ -2255,52 +2312,52 @@ export default function App() {
   useEffect(() => { userRef.current = user; }, [user]);
 
   useEffect(() => {
-    const fgSub = Notifications.addNotificationReceivedListener((notification) => {
-      const habitId = notification.request.content.data?.habitId;
-      if (!habitId) return;
-      const habit = habitsRef.current.find(h => h.id === habitId);
-      if (!habit) return;
-      setAlarmModal({ habit });
-    });
-    return () => fgSub.remove();
-  }, []);
-
-  useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener(async (response) => {
-      const { actionIdentifier, notification } = response;
-      const habitId = notification.request.content.data?.habitId;
+    // Foreground event: notification arrives while app is open → show full-screen alarm
+    const unsub = notifee.onForegroundEvent(async ({ type, detail }) => {
+      const { notification, pressAction } = detail;
+      const habitId = notification?.data?.habitId;
       if (!habitId) return;
       const habit = habitsRef.current.find(h => h.id === habitId);
       if (!habit) return;
 
-      if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+      if (type === EventType.DELIVERED) {
         setAlarmModal({ habit });
         return;
       }
 
-      if (!habit.highPriority) return;
-      const todayKey = getTodayKey();
-      if (actionIdentifier === 'done_now') {
-        if (logsRef.current[todayKey]?.[habitId] === true) return;
-        const nl = { ...logsRef.current };
-        if (!nl[todayKey]) nl[todayKey] = {};
-        nl[todayKey][habitId] = true;
-        const xpEarned = 20;
-        const nu = { ...userRef.current, xp: userRef.current.xp + xpEarned };
-        setLogs(nl); setUser(nu);
-        await Store.set('logs', nl); await Store.set('user', nu);
-        const streak = getStreak(nl, habitId);
-        setCelebration({ habit, streak, xpEarned });
-        playApplause();
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else if (actionIdentifier === 'skip_today') {
-        const nu = { ...userRef.current, xp: Math.max(0, userRef.current.xp - 15) };
-        setUser(nu);
-        await Store.set('user', nu);
-        await scheduleFollowUpReminder(habit.name);
+      if (type === EventType.PRESS && !pressAction?.id) {
+        setAlarmModal({ habit });
+        return;
+      }
+
+      if (type === EventType.ACTION_PRESS) {
+        const todayKey = getTodayKey();
+        if (pressAction?.id === 'done_now') {
+          if (logsRef.current[todayKey]?.[habitId] === true) return;
+          const nl = { ...logsRef.current };
+          if (!nl[todayKey]) nl[todayKey] = {};
+          nl[todayKey][habitId] = true;
+          const xpEarned = habit.highPriority ? 20 : 10;
+          const nu = { ...userRef.current, xp: userRef.current.xp + xpEarned };
+          setLogs(nl); setUser(nu);
+          await Store.set('logs', nl); await Store.set('user', nu);
+          const streak = getStreak(nl, habitId);
+          setCelebration({ habit, streak, xpEarned });
+          playApplause();
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          await notifee.cancelNotification(notification.id);
+        } else if (pressAction?.id === 'skip_today') {
+          if (habit.highPriority) {
+            const nu = { ...userRef.current, xp: Math.max(0, userRef.current.xp - 15) };
+            setUser(nu);
+            await Store.set('user', nu);
+            await scheduleFollowUpReminder(habit.name);
+          }
+          await notifee.cancelNotification(notification.id);
+        }
       }
     });
-    return () => sub.remove();
+    return () => unsub();
   }, []);
 
   const handleAlarmDone = async () => {

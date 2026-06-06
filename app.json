@@ -11,11 +11,27 @@
       "adaptiveIcon": {
         "backgroundColor": "#6C3CE1"
       },
-      "jsEngine": "jsc"
+      "jsEngine": "jsc",
+      "permissions": [
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM",
+        "android.permission.WAKE_LOCK",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "plugins": [
-      "expo-notifications",
-      "expo-av"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/hadbit_icon_svg.png",
+          "color": "#6C3CE1"
+        }
+      ],
+      "expo-av",
+      "@notifee/react-native"
     ]
   }
 }
