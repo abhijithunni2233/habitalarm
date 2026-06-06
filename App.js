@@ -24,13 +24,25 @@ Notifications.setNotificationHandler({
 async function setupNotifications() {
   try {
     if (!Device.isDevice) return;
-    if (Platform.OS === 'android')
+    if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('habit-alarms', {
         name: 'Habit Alarms',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#6C3CE1',
       });
+      await Notifications.setNotificationChannelAsync('high-priority-alarms', {
+        name: 'High Priority Alarms',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 500, 200, 500, 200, 500],
+        lightColor: '#FF6B6B',
+        bypassDnd: true,
+      });
+    }
+    await Notifications.setNotificationCategoryAsync('high_priority_habit', [
+      { identifier: 'done_now', buttonTitle: '✅ Done Now', options: { opensAppToForeground: true } },
+      { identifier: 'skip_today', buttonTitle: '😔 Skip Today', options: { opensAppToForeground: true } },
+    ]);
     const { status } = await Notifications.requestPermissionsAsync();
     return status === 'granted';
   } catch (e) {
@@ -38,21 +50,39 @@ async function setupNotifications() {
   }
 }
 
+async function scheduleFollowUpReminder(habitName) {
+  try {
+    const tonight = new Date();
+    tonight.setHours(22, 0, 0, 0);
+    if (tonight <= new Date()) return;
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '💔 You skipped a priority habit',
+        body: `"${habitName}" was skipped today. Show up tomorrow — don't break the chain! 💪`,
+        sound: true,
+      },
+      trigger: { date: tonight, channelId: 'habit-alarms' },
+    });
+  } catch (e) {}
+}
+
 async function scheduleAlarm(habit, alarm) {
   try {
     const id = `habit_${habit.id}_${alarm.hour}_${alarm.minute}`;
     await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+    const isHigh = !!habit.highPriority;
     await Notifications.scheduleNotificationAsync({
       identifier: id,
       content: {
-        title: `⏰ ${habit.icon} ${habit.name}`,
-        body: `Time for your habit! Keep the streak going 🔥`,
+        title: isHigh ? `⚡ ${habit.icon} ${habit.name} — High Priority!` : `⏰ ${habit.icon} ${habit.name}`,
+        body: isHigh ? `Your priority habit is calling. Do it now or skip?` : `Time for your habit! Keep the streak going 🔥`,
         sound: true,
         data: { habitId: habit.id },
-        color: habit.color || '#6C3CE1',
+        color: isHigh ? '#FF6B6B' : (habit.color || '#6C3CE1'),
+        ...(isHigh && { categoryIdentifier: 'high_priority_habit' }),
       },
       trigger: {
-        channelId: 'habit-alarms',
+        channelId: isHigh ? 'high-priority-alarms' : 'habit-alarms',
         hour: alarm.hour,
         minute: alarm.minute,
         repeats: true,
@@ -478,6 +508,87 @@ function RemarkModal({ visible, habitName, habitColor, existingRemark, onSave, o
   );
 }
 
+function CelebrationModal({ visible, habit, streak, xpEarned, onClose }) {
+  const scale = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const particles = useRef(
+    Array.from({ length: 12 }, () => ({
+      x: new Animated.Value(0),
+      y: new Animated.Value(0),
+      op: new Animated.Value(1),
+    }))
+  ).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    scale.setValue(0); opacity.setValue(0);
+    particles.forEach(p => { p.x.setValue(0); p.y.setValue(0); p.op.setValue(1); });
+    Animated.parallel([
+      Animated.spring(scale, { toValue: 1, tension: 50, friction: 5, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
+    const angleStep = (2 * Math.PI) / particles.length;
+    particles.forEach((p, i) => {
+      const angle = angleStep * i;
+      const dist = 110 + Math.random() * 60;
+      Animated.parallel([
+        Animated.timing(p.x, { toValue: Math.cos(angle) * dist, duration: 900, useNativeDriver: true }),
+        Animated.timing(p.y, { toValue: Math.sin(angle) * dist - 40, duration: 900, useNativeDriver: true }),
+        Animated.sequence([
+          Animated.delay(500),
+          Animated.timing(p.op, { toValue: 0, duration: 400, useNativeDriver: true }),
+        ]),
+      ]).start();
+    });
+    const t = setTimeout(onClose, 3800);
+    return () => clearTimeout(t);
+  }, [visible]);
+
+  if (!habit) return null;
+
+  const compliment =
+    streak >= 30 ? `${streak} days straight. Truly legendary.`
+    : streak >= 14 ? `${streak}-day streak! You're unstoppable.`
+    : streak >= 7 ? `${streak} days strong. Keep this fire alive.`
+    : streak >= 3 ? `${streak} days in a row. You're building something real.`
+    : `You showed up today. That's what counts.`;
+
+  const EMOJIS = ['⭐','✨','🎉','💫','🔥','💪','🌟','⚡','🏆','🎊','💥','❤️'];
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <TouchableOpacity
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' }}
+        activeOpacity={1} onPress={onClose}>
+        <Animated.View style={{ transform: [{ scale }], opacity, alignItems: 'center' }}>
+          {particles.map((p, i) => (
+            <Animated.Text
+              key={i}
+              style={{ position: 'absolute', fontSize: 22, transform: [{ translateX: p.x }, { translateY: p.y }], opacity: p.op }}>
+              {EMOJIS[i % EMOJIS.length]}
+            </Animated.Text>
+          ))}
+          <LinearGradient
+            colors={[C.success, '#00A878']}
+            style={{ borderRadius: 28, padding: 32, alignItems: 'center', minWidth: 280, maxWidth: 320 }}>
+            <Text style={{ fontSize: 64, marginBottom: 8 }}>{habit.icon}</Text>
+            <Text style={{ fontSize: 22, fontWeight: '900', color: '#fff', textAlign: 'center', marginBottom: 10 }}>
+              {habit.name}
+            </Text>
+            <View style={{ backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: 99, paddingHorizontal: 20, paddingVertical: 6, marginBottom: 16 }}>
+              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 20 }}>+{xpEarned} XP</Text>
+            </View>
+            <Text style={{ fontSize: 15, color: 'rgba(255,255,255,0.92)', textAlign: 'center', lineHeight: 22, fontWeight: '600' }}>
+              {compliment}
+            </Text>
+            <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 20 }}>Tap anywhere to close</Text>
+          </LinearGradient>
+        </Animated.View>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
 function QuotesCard() {
   const [idx, setIdx] = useState(0);
   const tx = useRef(new Animated.Value(0)).current, op = useRef(new Animated.Value(1)).current;
@@ -635,6 +746,7 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
           <TouchableOpacity style={{ flex: 1, marginLeft: 10 }} onPress={() => setExpandedHabit(expandedHabit === h.id ? null : h.id)}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={[st.habitName, isNotDone && { textDecorationLine: 'line-through', opacity: 0.7 }]}>{h.name}</Text>
+              {h.highPriority && <Text style={{ fontSize: 11, color: '#FF9090', fontWeight: '900' }}>⚡</Text>}
               {getDailyTodos(h.id).length > 0 && (
                 <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11 }}>{expandedHabit === h.id ? '▲' : '▼'}</Text>
               )}
@@ -1061,6 +1173,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerDate, setPickerDate] = useState(new Date());
   const [saving, setSaving] = useState(false);
+  const [highPriority, setHighPriority] = useState(existing?.highPriority || false);
 
   const HABIT_TYPES = [
     { id: 'checkmark', label: 'Checkmark', sub: 'Track yes or no per day', icon: '✅' },
@@ -1129,6 +1242,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
       restDays: existing?.restDays || [],
       duration: existing?.duration || 0,
       alarms: finalAlarms,
+      highPriority,
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     await cancelHabitAlarms(habit.id);
@@ -1306,6 +1420,27 @@ function AddHabitScreen({ existing, onSave, onBack }) {
               More reminders can be added later from the habit settings.
             </Text>
           </>
+        )}
+        <View style={{ height: 1, backgroundColor: C.border, marginVertical: 28 }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flex: 1, marginRight: 16 }}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: C.text }}>⚡ High Priority</Text>
+            <Text style={{ fontSize: 13, color: C.textMuted, marginTop: 4, lineHeight: 19 }}>
+              Sends an urgent notification with "Done Now" and "Skip" buttons. Skipping costs 15 XP and triggers a 10pm follow-up.
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => { Haptics.selectionAsync(); setHighPriority(p => !p); }}
+            style={{ width: 52, height: 30, borderRadius: 15, backgroundColor: highPriority ? '#FF6B6B' : C.section, justifyContent: 'center', paddingHorizontal: 3 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', alignSelf: highPriority ? 'flex-end' : 'flex-start' }} />
+          </TouchableOpacity>
+        </View>
+        {highPriority && (
+          <View style={{ backgroundColor: '#FF6B6B14', borderRadius: 12, padding: 14, marginTop: 12, borderWidth: 1.5, borderColor: '#FF6B6B40' }}>
+            <Text style={{ fontSize: 13, color: '#FF6B6B', fontWeight: '700', lineHeight: 20 }}>
+              ⚡ Alarm will include action buttons. Complete it for +20 XP (2× bonus). Skip and lose 15 XP — plus a 10pm reminder to stay accountable.
+            </Text>
+          </View>
         )}
       </ScrollView>
     );
@@ -1924,6 +2059,10 @@ export default function App() {
   const [editHabit, setEditHabit] = useState(null);
   const [detailHabit, setDetailHabit] = useState(null);
   const [tab, setTab] = useState('home');
+  const [celebration, setCelebration] = useState(null);
+  const habitsRef = useRef([]);
+  const logsRef = useRef({});
+  const userRef = useRef({ xp: 0, name: 'Champion' });
 
   useEffect(() => {
     setupNotifications();
@@ -1951,6 +2090,41 @@ export default function App() {
     });
     return () => handler.remove();
   }, [screen, showMonthly]);
+
+  useEffect(() => { habitsRef.current = habits; }, [habits]);
+  useEffect(() => { logsRef.current = logs; }, [logs]);
+  useEffect(() => { userRef.current = user; }, [user]);
+
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener(async (response) => {
+      const { actionIdentifier, notification } = response;
+      const habitId = notification.request.content.data?.habitId;
+      if (!habitId) return;
+      const habit = habitsRef.current.find(h => h.id === habitId);
+      if (!habit || !habit.highPriority) return;
+      const todayKey = getTodayKey();
+      if (actionIdentifier === 'done_now') {
+        if (logsRef.current[todayKey]?.[habitId] === true) return;
+        const nl = { ...logsRef.current };
+        if (!nl[todayKey]) nl[todayKey] = {};
+        nl[todayKey][habitId] = true;
+        const xpEarned = 20;
+        const nu = { ...userRef.current, xp: userRef.current.xp + xpEarned };
+        setLogs(nl); setUser(nu);
+        await Store.set('logs', nl); await Store.set('user', nu);
+        const streak = getStreak(nl, habitId);
+        setCelebration({ habit, streak, xpEarned });
+        playApplause();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else if (actionIdentifier === 'skip_today') {
+        const nu = { ...userRef.current, xp: Math.max(0, userRef.current.xp - 15) };
+        setUser(nu);
+        await Store.set('user', nu);
+        await scheduleFollowUpReminder(habit.name);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   const reloadHabits = async () => { const h = await Store.get('habits', []); setHabits(h); };
   const deleteHabit = (id) => {
@@ -2010,6 +2184,13 @@ export default function App() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <StatusBar style="dark" />
       {renderScreen()}
+      <CelebrationModal
+        visible={!!celebration}
+        habit={celebration?.habit}
+        streak={celebration?.streak || 0}
+        xpEarned={celebration?.xpEarned || 20}
+        onClose={() => setCelebration(null)}
+      />
     </View>
   );
 }
