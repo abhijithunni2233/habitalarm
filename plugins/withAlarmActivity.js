@@ -61,13 +61,32 @@ public class AlarmActivity extends Activity {
         setContentView(getResources().getIdentifier(
             "activity_alarm", "layout", getPackageName()));
 
-        // ── Read notification data from intent extras ──────────────────────────
+        // ── Read notification data ─────────────────────────────────────────────
+        // notifee passes the full notification as a Bundle under "notification",
+        // with our custom data nested under Bundle "data" inside it.
         Bundle extras = getIntent().getExtras();
-        habitId         = str(extras, "habitId",       "");
-        String name     = str(extras, "habitName",     "Habit");
-        String icon     = str(extras, "habitIcon",     "\\u23F0");
-        String streakS  = str(extras, "streak",        "0");
-        boolean isHigh  = "true".equals(str(extras, "isHighPriority", "false"));
+        String name   = "Habit";
+        String icon   = "\\u23F0";
+        String streakS = "0";
+        boolean isHigh = false;
+
+        Bundle notifBundle = extras != null ? extras.getBundle("notification") : null;
+        Bundle dataBundle  = notifBundle != null ? notifBundle.getBundle("data") : null;
+        if (dataBundle != null) {
+            habitId = nvl(dataBundle.getString("habitId"),       "");
+            name    = nvl(dataBundle.getString("habitName"),     "Habit");
+            icon    = nvl(dataBundle.getString("habitIcon"),     "\\u23F0");
+            streakS = nvl(dataBundle.getString("streak"),        "0");
+            isHigh  = "true".equals(dataBundle.getString("isHighPriority"));
+        }
+        // Fallback: flat extras (in case notifee format ever changes)
+        if (habitId.isEmpty()) {
+            habitId = str(extras, "habitId",       "");
+            name    = str(extras, "habitName",     "Habit");
+            icon    = str(extras, "habitIcon",     "\\u23F0");
+            streakS = str(extras, "streak",        "0");
+            isHigh  = "true".equals(str(extras, "isHighPriority", "false"));
+        }
 
         // ── Find views ─────────────────────────────────────────────────────────
         View glowView   = find("glowRing");
@@ -112,7 +131,7 @@ public class AlarmActivity extends Activity {
             subV.setText("Your priority habit is calling — act now!");
             doneBtn.setText("\\u2705  Done Now  (+20 XP)");
             doneBtn.setBackground(pill(accent));
-            startAlarmSound(true);
+            startAlarmSound();
         } else {
             accent    = 0xFF6C3CE1;
             glowColor = 0xFF6C3CE1;
@@ -122,7 +141,7 @@ public class AlarmActivity extends Activity {
             subV.setText("Time to build your habit. Keep the streak going!");
             doneBtn.setText("\\u2705  Done Now");
             doneBtn.setBackground(pill(0xFF00C853));
-            startAlarmSound(false);
+            startAlarmSound();
         }
         card.setBackground(cardBg);
 
@@ -174,8 +193,11 @@ public class AlarmActivity extends Activity {
     private String str(Bundle b, String key, String def) {
         return b != null ? b.getString(key, def) : def;
     }
+    private String nvl(String val, String def) {
+        return (val != null && !val.isEmpty()) ? val : def;
+    }
 
-    private void startAlarmSound(boolean loop) {
+    private void startAlarmSound() {
         try {
             int id = getResources().getIdentifier("tick", "raw", getPackageName());
             if (id == 0) return;
@@ -189,7 +211,7 @@ public class AlarmActivity extends Activity {
             mediaPlayer.setDataSource(
                 afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
             afd.close();
-            mediaPlayer.setLooping(loop);
+            mediaPlayer.setLooping(true);
             mediaPlayer.setVolume(1f, 1f);
             mediaPlayer.prepare();
             mediaPlayer.start();

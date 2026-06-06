@@ -2256,7 +2256,7 @@ function FullScreenAlarmModal({ visible, habitData, onDone, onSkip }) {
 }
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showMonthly, setShowMonthly] = useState(false);
   const [screen, setScreen] = useState('main');
@@ -2317,32 +2317,46 @@ export default function App() {
   useEffect(() => { logsRef.current = logs; }, [logs]);
   useEffect(() => { userRef.current = user; }, [user]);
 
-  // Handle URL scheme callbacks from AlarmActivity (hadbit://alarm?action=done&habitId=xxx)
+  // Handle URL callbacks from AlarmActivity: hadbit://alarm?action=done&habitId=xxx
   useEffect(() => {
     async function handleAlarmUrl(url) {
-      if (!url) return;
+      if (!url || !url.startsWith('hadbit://alarm')) return;
       try {
-        const parsed = new URL(url);
-        if (parsed.hostname !== 'alarm') return;
-        const action = parsed.searchParams.get('action');
-        const habitId = parsed.searchParams.get('habitId');
-        if (!habitId || !action) return;
-        const habit = habitsRef.current.find(h => h.id === habitId);
+        // Manual parse — new URL() doesn't reliably handle custom schemes in RN
+        const qIdx = url.indexOf('?');
+        if (qIdx === -1) return;
+        const params = {};
+        url.slice(qIdx + 1).split('&').forEach(pair => {
+          const eq = pair.indexOf('=');
+          if (eq === -1) return;
+          params[decodeURIComponent(pair.slice(0, eq))] = decodeURIComponent(pair.slice(eq + 1));
+        });
+        const { action, habitId } = params;
+        if (!action || !habitId) return;
+
+        // Read from Store directly — avoids race with state loading on cold start
+        const [habits, logs, user] = await Promise.all([
+          Store.get('habits', []),
+          Store.get('logs', {}),
+          Store.get('user', { xp: 0 }),
+        ]);
+        const habit = habits.find(h => h.id === habitId);
         if (!habit) return;
+
         if (action === 'done') {
           const todayKey = getTodayKey();
-          if (logsRef.current[todayKey]?.[habitId] === true) return;
-          const nl = { ...logsRef.current };
-          if (!nl[todayKey]) nl[todayKey] = {};
-          nl[todayKey][habitId] = true;
+          if (logs[todayKey]?.[habitId] === true) return;
+          if (!logs[todayKey]) logs[todayKey] = {};
+          logs[todayKey][habitId] = true;
           const xpEarned = habit.highPriority ? 20 : 10;
-          const nu = { ...userRef.current, xp: userRef.current.xp + xpEarned };
-          setLogs(nl); setUser(nu);
-          await Store.set('logs', nl); await Store.set('user', nu);
+          user.xp = (user.xp || 0) + xpEarned;
+          await Promise.all([Store.set('logs', logs), Store.set('user', user)]);
+          setLogs(l => ({ ...l, ...logs }));
+          setUser(u => ({ ...u, xp: user.xp }));
         } else if (action === 'skip') {
-          const nu = { ...userRef.current, xp: Math.max(0, userRef.current.xp - 5) };
-          setUser(nu);
-          await Store.set('user', nu);
+          user.xp = Math.max(0, (user.xp || 0) - 5);
+          await Store.set('user', user);
+          setUser(u => ({ ...u, xp: user.xp }));
         }
       } catch (e) {}
     }
