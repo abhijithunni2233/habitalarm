@@ -9,10 +9,13 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import notifee, {
   AndroidImportance,
   AndroidCategory,
   AndroidVisibility,
+  AndroidNotificationSetting,
   TriggerType,
   RepeatFrequency,
   EventType,
@@ -55,6 +58,7 @@ async function setupNotifications() {
       });
     }
     await notifee.requestPermission();
+    if (Platform.OS === 'android') await checkExactAlarmPermission();
     if (Device.isDevice) {
       const { status } = await Notifications.requestPermissionsAsync();
       return status === 'granted';
@@ -63,6 +67,25 @@ async function setupNotifications() {
   } catch (e) {
     return false;
   }
+}
+
+// Android 12+ gates exact alarm scheduling behind a special-access toggle;
+// without it, daily habit alarms silently degrade to inexact/batched delivery
+// and fire at unpredictable times instead of the time the user picked.
+async function checkExactAlarmPermission() {
+  try {
+    const settings = await notifee.getNotificationSettings();
+    if (settings.android?.alarm !== AndroidNotificationSetting.ENABLED) {
+      Alert.alert(
+        '⏰ Enable Exact Alarms',
+        'To make sure habit alarms fire at exactly the time you set, allow Hadbit to schedule exact alarms.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => notifee.openAlarmPermissionSettings() },
+        ]
+      );
+    }
+  } catch (e) {}
 }
 
 async function scheduleFollowUpReminder(habitName) {
@@ -136,8 +159,28 @@ async function cancelHabitAlarms(habitId) {
   try {
     const scheduled = await notifee.getTriggerNotifications();
     for (const { notification } of scheduled) {
-      if (notification.id?.startsWith(`habit_${habitId}`))
+      if (notification.id?.startsWith(`habit_${habitId}_`))
         await notifee.cancelTriggerNotification(notification.id);
+    }
+  } catch (e) {}
+}
+
+// Self-heal: cancel any scheduled alarm that no longer matches a habit's
+// current configuration (deleted habit, edited/removed reminder, etc). Run
+// once on app launch to clear stray alarms that could otherwise fire
+// "out of nowhere" for a reminder the user no longer has set.
+async function reconcileAlarms(habits) {
+  try {
+    const validIds = new Set();
+    habits.forEach(h => {
+      (h.alarms || []).forEach(a => validIds.add(`habit_${h.id}_${a.hour}_${a.minute}`));
+    });
+    const scheduled = await notifee.getTriggerNotifications();
+    for (const { notification } of scheduled) {
+      const id = notification.id || '';
+      if (id.startsWith('habit_') && !validIds.has(id)) {
+        await notifee.cancelTriggerNotification(id).catch(() => {});
+      }
     }
   } catch (e) {}
 }
@@ -253,6 +296,12 @@ function getTodayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function addDaysKey(dateKey, n) {
+  const d = new Date(dateKey + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function getDateStr(dateKey) {
   if (!dateKey) return '';
   const [y, m, d] = dateKey.split('-');
@@ -285,6 +334,22 @@ function getRate(logs, id, days = 7) {
   return Math.round((count / days) * 100);
 }
 
+// Completion % for a single date, accounting for rest days and measurable targets
+function getDayCompletion(habits, logs, dateKey) {
+  const dayIdx = new Date(dateKey + 'T00:00:00').getDay();
+  const active = habits.filter(h => !h.restDays?.includes(dayIdx));
+  const done = active.filter(h => {
+    const tl = logs[dateKey]?.[h.id];
+    if (h.habitType === 'measurable') {
+      const t = h.dailyTarget || null;
+      return t ? (typeof tl === 'number' && tl >= t) : (typeof tl === 'number' && tl > 0);
+    }
+    return tl === true;
+  }).length;
+  const pct = active.length > 0 ? Math.round((done / active.length) * 100) : 0;
+  return { done, active: active.length, pct };
+}
+
 function fmtAlarm(a) {
   const h = a.hour, m = String(a.minute).padStart(2, '0'), p = h >= 12 ? 'PM' : 'AM', dh = h === 0 ? 12 : h > 12 ? h - 12 : h;
   return `${dh}:${m} ${p}`;
@@ -301,6 +366,44 @@ const Store = {
     try { await AsyncStorage.setItem(key, JSON.stringify(val)); } catch {}
   },
 };
+
+// Any habit left unmarked by the end of a day is treated as skipped. Runs on
+// every launch and walks the gap between the last run and yesterday, so days
+// missed while the app was closed still get closed out. Never touches
+// "today" (still in progress) and, on first run after this shipped, doesn't
+// retroactively mark pre-existing blank history — it just starts tracking
+// from tomorrow.
+async function backfillMissedDays(habits, logs) {
+  const today = getTodayKey();
+  const yesterday = addDaysKey(today, -1);
+  const lastDone = await Store.get('lastBackfillDate', null);
+
+  if (!lastDone) {
+    await Store.set('lastBackfillDate', yesterday);
+    return null;
+  }
+  if (lastDone >= yesterday) return null;
+
+  const nl = { ...logs };
+  let changed = false;
+  let cursor = lastDone;
+  for (let i = 0; i < 60 && cursor < yesterday; i++) {
+    cursor = addDaysKey(cursor, 1);
+    const dayIdx = new Date(cursor + 'T00:00:00').getDay();
+    const dayLogs = { ...(nl[cursor] || {}) };
+    let dayChanged = false;
+    habits.forEach(h => {
+      if (h.createdAt && h.createdAt.slice(0, 10) > cursor) return;
+      if (h.restDays?.includes(dayIdx)) return;
+      if (dayLogs[h.id] === undefined) { dayLogs[h.id] = 'notdone'; dayChanged = true; }
+    });
+    if (dayChanged) { nl[cursor] = dayLogs; changed = true; }
+  }
+  await Store.set('lastBackfillDate', yesterday);
+  if (!changed) return null;
+  await Store.set('logs', nl);
+  return nl;
+}
 
 // Handles notification actions when app is killed or in background
 notifee.onBackgroundEvent(async ({ type, detail }) => {
@@ -463,6 +566,12 @@ const rm = StyleSheet.create({
   saveTxt: { color: '#fff', fontWeight: '800', fontSize: 15 },
 });
 
+const nd = StyleSheet.create({
+  reasonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  reasonBtn: { width: '31%', paddingVertical: 12, borderRadius: 12, backgroundColor: C.section, borderWidth: 1.5, borderColor: C.section, alignItems: 'center', gap: 4 },
+  reasonLabel: { fontSize: 11, fontWeight: '700', color: C.textSub, textAlign: 'center' },
+});
+
 function SplashScreen({ onDone }) {
   const wave1 = useRef(new Animated.Value(0)).current, wave2 = useRef(new Animated.Value(0)).current, wave3 = useRef(new Animated.Value(0)).current;
   const logoScale = useRef(new Animated.Value(0)).current, logoOpacity = useRef(new Animated.Value(0)).current, textOpacity = useRef(new Animated.Value(0)).current;
@@ -564,6 +673,68 @@ function RemarkModal({ visible, habitName, habitColor, existingRemark, onSave, o
               <TouchableOpacity onPress={save} style={{ flex: 1 }}>
                 <LinearGradient colors={[color, C.primaryLight]} style={rm.saveBtn}>
                   <Text style={rm.saveTxt}>Save Remark</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+const NOT_DONE_REASONS = [
+  { emoji: '😴', label: 'Too tired' },
+  { emoji: '⏰', label: 'No time' },
+  { emoji: '🤒', label: 'Sick' },
+  { emoji: '😑', label: 'Forgot' },
+  { emoji: '🙅', label: 'Not feeling it' },
+  { emoji: '❓', label: 'Other' },
+];
+
+function NotDoneModal({ visible, habitName, habitColor, existingRemark, onSave, onClose }) {
+  const [reasonIdx, setReasonIdx] = useState(0);
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    if (visible) {
+      const existingLabel = existingRemark?.note?.split(' · ')[0];
+      const idx = NOT_DONE_REASONS.findIndex(r => r.label === existingLabel);
+      setReasonIdx(idx >= 0 ? idx : 0);
+      setNote(idx >= 0 ? existingRemark.note.split(' · ').slice(1).join(' · ') : '');
+    }
+  }, [visible]);
+  const save = () => {
+    const reason = NOT_DONE_REASONS[reasonIdx];
+    const combinedNote = note.trim() ? `${reason.label} · ${note.trim()}` : reason.label;
+    onSave({ emoji: reason.emoji, note: combinedNote });
+    onClose();
+  };
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={rm.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={rm.sheet}>
+          <LinearGradient colors={[C.danger, '#FF8C42']} style={rm.sheetHeader}>
+            <Text style={rm.sheetTitle}>😔 No worries</Text>
+            <Text style={rm.sheetSub}>Why did you miss <Text style={{ fontWeight: '900' }}>{habitName}</Text>?</Text>
+          </LinearGradient>
+          <View style={rm.body}>
+            <Text style={rm.label}>Quick reason</Text>
+            <View style={nd.reasonGrid}>
+              {NOT_DONE_REASONS.map((r, i) => (
+                <TouchableOpacity key={r.label} onPress={() => { Haptics.selectionAsync(); setReasonIdx(i); }}
+                  style={[nd.reasonBtn, reasonIdx === i && { backgroundColor: C.danger + '18', borderColor: C.danger, borderWidth: 2 }]}>
+                  <Text style={{ fontSize: 20 }}>{r.emoji}</Text>
+                  <Text style={nd.reasonLabel}>{r.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[rm.label, { marginTop: 16 }]}>Note (optional)</Text>
+            <TextInput style={rm.noteInput} value={note} onChangeText={setNote} placeholder="Add more detail…" placeholderTextColor={C.textMuted} maxLength={100} multiline />
+            <View style={rm.btnRow}>
+              <TouchableOpacity onPress={onClose} style={rm.skipBtn}><Text style={rm.skipTxt}>Skip</Text></TouchableOpacity>
+              <TouchableOpacity onPress={save} style={{ flex: 1 }}>
+                <LinearGradient colors={[C.danger, '#FF8C42']} style={rm.saveBtn}>
+                  <Text style={rm.saveTxt}>Save Reason</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -689,25 +860,30 @@ function QuotesCard() {
   );
 }
 
-function DateSelector({ selectedDate, onSelectDate }) {
+function DateSelector({ selectedDate, onSelectDate, habits, logs }) {
   const dates = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    dates.push({ key, day: DAYS_SHORT[d.getDay()], date: d.getDate(), isToday: i === 0 });
+    const { pct } = getDayCompletion(habits, logs, key);
+    dates.push({ key, day: DAYS_SHORT[d.getDay()], date: d.getDate(), isToday: i === 0, pct });
   }
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 4 }}>
-        {dates.map(d => (
-          <TouchableOpacity key={d.key} onPress={() => onSelectDate(d.key)}
-            style={[{ width: 52, paddingVertical: 10, borderRadius: 16, alignItems: 'center', backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border, elevation: 1, shadowColor: C.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6 }, selectedDate === d.key && { backgroundColor: C.primary, borderColor: C.primary, elevation: 4, shadowOpacity: 0.20 }, d.isToday && selectedDate !== d.key && { borderColor: C.primary }]}>
-            <Text style={{ fontSize: 10, fontWeight: '700', color: selectedDate === d.key ? 'rgba(255,255,255,0.80)' : C.textMuted }}>{d.day}</Text>
-            <Text style={{ fontSize: 19, fontWeight: '900', color: selectedDate === d.key ? '#fff' : C.text, marginTop: 2 }}>{d.date}</Text>
-            {d.isToday && <Text style={{ fontSize: 8, color: selectedDate === d.key ? 'rgba(255,255,255,0.85)' : C.primary, fontWeight: '700' }}>TODAY</Text>}
-          </TouchableOpacity>
-        ))}
+        {dates.map(d => {
+          const sel = selectedDate === d.key;
+          const pctColor = d.pct === 100 ? C.success : d.pct > 0 ? (sel ? '#fff' : C.primary) : (sel ? 'rgba(255,255,255,0.6)' : C.textMuted);
+          return (
+            <TouchableOpacity key={d.key} onPress={() => onSelectDate(d.key)}
+              style={[{ width: 52, paddingVertical: 10, borderRadius: 16, alignItems: 'center', backgroundColor: C.card, borderWidth: 1.5, borderColor: C.border, elevation: 1, shadowColor: C.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6 }, sel && { backgroundColor: C.primary, borderColor: C.primary, elevation: 4, shadowOpacity: 0.20 }, d.isToday && !sel && { borderColor: C.primary }]}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: sel ? 'rgba(255,255,255,0.80)' : C.textMuted }}>{d.isToday ? 'TODAY' : d.day}</Text>
+              <Text style={{ fontSize: 19, fontWeight: '900', color: sel ? '#fff' : C.text, marginTop: 2 }}>{d.date}</Text>
+              <Text style={{ fontSize: 9, fontWeight: '800', color: pctColor, marginTop: 2 }}>{d.pct}%</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </ScrollView>
   );
@@ -742,7 +918,8 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
     onPanResponderMove: (_, gs) => { if (gs.dx < 0) swipeX.setValue(gs.dx); },
     onPanResponderRelease: (_, gs) => {
       if (gs.dx < -80) {
-        if (selectedDateRef.current !== getTodayKey()) {
+        if (selectedDateRef.current > getTodayKey()) {
+          // Can't mark a future day not-done yet
           Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start();
           return;
         }
@@ -756,17 +933,18 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
     },
   })).current;
 
-  const handleMeasurableTap = async () => {
+  const handleMeasurableDelta = async (delta) => {
     if (isRest) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const nl = { ...logs };
     if (!nl[selectedDate]) nl[selectedDate] = {};
     const prev = typeof nl[selectedDate][h.id] === 'number' ? nl[selectedDate][h.id] : 0;
-    const next = prev + measurableIncrement;
+    const next = Math.max(0, prev + delta);
+    if (next === prev) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     nl[selectedDate][h.id] = next;
     const wasDone = measurableTarget ? prev >= measurableTarget : prev > 0;
     const nowDone = measurableTarget ? next >= measurableTarget : next > 0;
-    const xpDelta = (!wasDone && nowDone) ? 10 : 0;
+    const xpDelta = (!wasDone && nowDone) ? 10 : (wasDone && !nowDone) ? -10 : 0;
     const nu = { ...user, xp: Math.max(0, user.xp + xpDelta) };
     setLogs(nl); setUser(nu);
     await Store.set('logs', nl); await Store.set('user', nu);
@@ -861,11 +1039,18 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
             )}
           </TouchableOpacity>
           {isMeasurable && !isRest && !isNotDone ? (
-            <TouchableOpacity onPress={handleMeasurableTap}
-              style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', justifyContent: 'center', marginLeft: 8 }}>
-              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 13 }}>+{measurableIncrement}</Text>
-              <Text style={{ color: 'rgba(255,255,255,0.80)', fontSize: 9, fontWeight: '700' }}>{h.unit || 'unit'}</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+              <TouchableOpacity onPress={() => handleMeasurableDelta(-measurableIncrement)}
+                disabled={measurableCount <= 0}
+                style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 12, width: 34, height: 34, alignItems: 'center', justifyContent: 'center', opacity: measurableCount <= 0 ? 0.4 : 1 }}>
+                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 17 }}>−</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleMeasurableDelta(measurableIncrement)}
+                style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 13 }}>+{measurableIncrement}</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.80)', fontSize: 9, fontWeight: '700' }}>{h.unit || 'unit'}</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             !isMeasurable && (
              // AFTER
@@ -962,6 +1147,8 @@ function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTo
   const [addingTaskFor, setAddingTaskFor] = useState(null);
   const [remarkModal, setRemarkModal] = useState(false);
   const [remarkHabit, setRemarkHabit] = useState(null);
+  const [notDoneModal, setNotDoneModal] = useState(false);
+  const [notDoneHabit, setNotDoneHabit] = useState(null);
 
   const barAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -983,6 +1170,7 @@ function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTo
     else { nl[selectedDate][h.id] = !was; }
     const completing = !was && !forceNotDone && nl[selectedDate][h.id] === true;
     const undoing = was === true && !forceNotDone;
+    const freshNotDone = forceNotDone && was !== 'notdone';
     const newXp = Math.max(0, user.xp + (completing ? 10 : undoing ? -10 : 0));
     const nu = { ...user, xp: newXp };
     setLogs(nl); setUser(nu);
@@ -999,12 +1187,22 @@ function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTo
       }).length;
       if (newDone === active.length && active.length > 0) setTimeout(() => playApplause(), 300);
       setRemarkHabit(h); setRemarkModal(true);
+    } else if (freshNotDone) {
+      setNotDoneHabit(h); setNotDoneModal(true);
     }
   };
 
   const saveRemark = async (remark) => {
     if (!remarkHabit) return;
     const key = `${selectedDate}_${remarkHabit.id}`;
+    const nr = { ...remarks, [key]: remark };
+    setRemarks(nr);
+    await Store.set('remarks', nr);
+  };
+
+  const saveNotDoneReason = async (remark) => {
+    if (!notDoneHabit) return;
+    const key = `${selectedDate}_${notDoneHabit.id}`;
     const nr = { ...remarks, [key]: remark };
     setRemarks(nr);
     await Store.set('remarks', nr);
@@ -1120,7 +1318,7 @@ const getDailyTodos = (habitId) => {
             </LinearGradient>
           </TouchableOpacity>
         </View>
-        <DateSelector selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+        <DateSelector selectedDate={selectedDate} onSelectDate={setSelectedDate} habits={habits} logs={logs} />
         {selectedDate !== today && (
           <View style={{ marginHorizontal: 16, marginBottom: 12, backgroundColor: '#FF8C4222', borderRadius: 12, padding: 10, borderWidth: 1.5, borderColor: '#FF8C42' }}>
             <Text style={{ color: '#FF8C42', fontWeight: '700', fontSize: 13, textAlign: 'center' }}>📅 Editing past day — Tap TODAY to return</Text>
@@ -1216,6 +1414,14 @@ const getDailyTodos = (habitId) => {
           existingRemark={remarkHabit ? remarks[`${selectedDate}_${remarkHabit.id}`] : null}
           onSave={saveRemark}
           onClose={() => { setRemarkModal(false); setRemarkHabit(null); }}
+        />
+        <NotDoneModal
+          visible={notDoneModal}
+          habitName={notDoneHabit?.name || ''}
+          habitColor={notDoneHabit?.color}
+          existingRemark={notDoneHabit ? remarks[`${selectedDate}_${notDoneHabit.id}`] : null}
+          onSave={saveNotDoneReason}
+          onClose={() => { setNotDoneModal(false); setNotDoneHabit(null); }}
         />
       </ScrollView>
     </Animated.View>
@@ -1542,6 +1748,67 @@ function AddHabitScreen({ existing, onSave, onBack }) {
   );
 }
 
+// Landscape habit x day-of-month matrix, styled for printing/physical review.
+function buildMonthMatrixHtml(habits, logs, year, month) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthLabel = `${MONTHS[month]} ${year}`;
+  const dayCols = Array.from({ length: daysInMonth }, (_, i) => `<th>${i + 1}</th>`).join('');
+  const rows = habits.map(h => {
+    const cells = Array.from({ length: daysInMonth }, (_, i) => {
+      const d = i + 1;
+      const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const status = logs[key]?.[h.id];
+      const isMeas = h.habitType === 'measurable';
+      let content = '';
+      let cls = 'blank';
+      if (isMeas) {
+        if (typeof status === 'number' && status > 0) {
+          const done = h.dailyTarget ? status >= h.dailyTarget : true;
+          content = String(status);
+          cls = done ? 'done' : 'partial';
+        } else if (status === 'notdone') { content = '&#10007;'; cls = 'notdone'; }
+      } else if (status === true) { content = '&#10003;'; cls = 'done'; }
+      else if (status === 'notdone') { content = '&#10007;'; cls = 'notdone'; }
+      return `<td class="${cls}">${content}</td>`;
+    }).join('');
+    return `<tr><td class="habit">${h.icon || ''} ${h.name}</td>${cells}</tr>`;
+  }).join('');
+  return `<!doctype html><html><head><meta charset="utf-8" />
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: Helvetica, Arial, sans-serif; padding: 24px; color: #1A1040; }
+      h1 { font-size: 20px; margin: 0 0 2px; }
+      .sub { font-size: 11px; color: #6B6490; margin-bottom: 16px; }
+      table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+      th, td { border: 1px solid #E2DCF8; text-align: center; font-size: 9px; padding: 4px 2px; }
+      th { background: #EDE9FF; color: #6B6490; font-weight: 700; }
+      td.habit { text-align: left; font-weight: 700; font-size: 10px; width: 130px; white-space: nowrap; overflow: hidden; }
+      td.done { background: #E6FBF5; color: #06D6A0; font-weight: 900; }
+      td.notdone { background: #FFF0F0; color: #FF6B6B; font-weight: 900; }
+      td.partial { background: #FFF7E6; color: #F4A021; font-weight: 900; }
+      .footer { margin-top: 16px; font-size: 9px; color: #B0A8CC; text-align: center; }
+    </style></head>
+    <body>
+      <h1>Hadbit — ${monthLabel}</h1>
+      <div class="sub">Habit completion matrix · exported ${getDateStr(getTodayKey())}</div>
+      <table>
+        <thead><tr><th style="text-align:left;">Habit</th>${dayCols}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="footer">Generated by Hadbit</div>
+    </body></html>`;
+}
+
+async function exportMonthMatrixPdf(habits, logs, year, month) {
+  const html = buildMonthMatrixHtml(habits, logs, year, month);
+  // A4 landscape at 72 PPI (width/height swapped from the portrait default)
+  const { uri } = await Print.printToFileAsync({ html, width: 842, height: 595 });
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: `Hadbit ${MONTHS[month]} ${year}`, UTI: 'com.adobe.pdf' });
+  }
+  return uri;
+}
+
 function MonthlyCalendarScreen({ habits, logs, onBack }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -1566,13 +1833,32 @@ function MonthlyCalendarScreen({ habits, logs, onBack }) {
   }, []);
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    if (habits.length === 0) { Alert.alert('No habits yet', 'Add a habit before exporting.'); return; }
+    setExporting(true);
+    try {
+      await exportMonthMatrixPdf(habits, logs, year, month);
+    } catch (e) {
+      Alert.alert('Export failed', 'Could not generate the PDF. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <LinearGradient colors={[C.primary, C.primaryLight]} style={st.screenHeader} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-        <TouchableOpacity onPress={onBack} style={{ marginBottom: 12 }}><Text style={{ color: 'rgba(255,255,255,0.9)', fontWeight: '700', fontSize: 15 }}>← Back</Text></TouchableOpacity>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <TouchableOpacity onPress={onBack}><Text style={{ color: 'rgba(255,255,255,0.9)', fontWeight: '700', fontSize: 15 }}>← Back</Text></TouchableOpacity>
+          <TouchableOpacity onPress={handleExport} disabled={exporting}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 99, paddingHorizontal: 14, paddingVertical: 8, opacity: exporting ? 0.6 : 1 }}>
+            <Text style={{ fontSize: 13 }}>📄</Text>
+            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{exporting ? 'Exporting…' : 'Export PDF'}</Text>
+          </TouchableOpacity>
+        </View>
         <Text style={st.screenHeaderTitle}>📆 Monthly Calendar</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 8 }}>
           <TouchableOpacity onPress={prevMonth} style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 99, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>‹</Text></TouchableOpacity>
@@ -1653,6 +1939,7 @@ function StatsScreen({ habits, logs, moods, onMonthly }) {
   }
   useEffect(() => { const handler = BackHandler.addEventListener('hardwareBackPress', () => false); return () => handler.remove(); }, []);
   useEffect(() => { setTimeout(() => matrixRef.current?.scrollToEnd({ animated: false }), 300); }, []);
+  const last7 = dayKeys.slice(-7);
   return (
     <ScrollView style={{ flex: 1, backgroundColor: C.bg }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 }}>
       <LinearGradient colors={[C.primary, C.primaryLight]} style={st.screenHeader} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
@@ -1750,8 +2037,17 @@ function StatsScreen({ habits, logs, moods, onMonthly }) {
                     {h.habitDirection === 'quit' ? `🚫 ${streak}d clean` : `🔥 ${streak}`}
                   </Text>
                 </View>
-                <View style={{ height: 7, backgroundColor: C.section, borderRadius: 99, overflow: 'hidden', marginVertical: 6 }}>
-                  <View style={{ height: '100%', width: `${r7}%`, backgroundColor: h.color || C.primary, borderRadius: 99 }} />
+                <View style={{ flexDirection: 'row', gap: 4, marginVertical: 6 }}>
+                  {last7.map(dk => {
+                    const status = logs[dk.key]?.[h.id];
+                    const isMeas = h.habitType === 'measurable';
+                    const done = isMeas
+                      ? (typeof status === 'number' && (h.dailyTarget ? status >= h.dailyTarget : status > 0))
+                      : status === true;
+                    const notdone = status === 'notdone';
+                    const cellColor = done ? (h.color || C.primary) : notdone ? C.danger + '55' : C.section;
+                    return <View key={dk.key} style={{ flex: 1, height: 16, borderRadius: 4, backgroundColor: cellColor }} />;
+                  })}
                 </View>
                 <Text style={{ fontSize: 11, color: C.textSub }}>7d: {r7}% · 30d: {r30}%{totalHabitMin > 0 ? ` · ⏱️ ${(totalHabitMin / 60).toFixed(1)}h` : ''}</Text>
               </View>
@@ -2276,6 +2572,7 @@ export default function App() {
   const habitsRef = useRef([]);
   const logsRef = useRef({});
   const userRef = useRef({ xp: 0, name: 'Champion' });
+  const handledNotificationIds = useRef(new Set());
 
   useEffect(() => {
     setupNotifications();
@@ -2289,15 +2586,22 @@ export default function App() {
       Store.get('todos', {}),
       Store.get('todologs', {}),
       Store.get('onboarded', false),
-    ]).then(([h, l, m, u, g, r, td, tl, onboarded]) => {
+    ]).then(async ([h, l, m, u, g, r, td, tl, onboarded]) => {
       setHabits(h); setLogs(l); setMoods(m); setUser(u); setGoals(g); setRemarks(r); setTodos(td); setTodoLogs(tl);
       habitsRef.current = h;
       if (!onboarded) setShowOnboarding(true);
+
+      reconcileAlarms(h);
+      const backfilled = await backfillMissedDays(h, l);
+      if (backfilled) { setLogs(backfilled); logsRef.current = backfilled; }
+
       // Show alarm modal if app was cold-started by tapping the notification
       notifee.getInitialNotification().then((initial) => {
         if (!initial) return;
+        const notifId = initial.notification?.id;
         const habitId = initial.notification?.data?.habitId;
-        if (!habitId) return;
+        if (!habitId || (notifId && handledNotificationIds.current.has(notifId))) return;
+        if (notifId) handledNotificationIds.current.add(notifId);
         const habit = h.find(x => x.id === habitId);
         if (habit) setAlarmModal({ habit });
       });
@@ -2375,6 +2679,11 @@ export default function App() {
       if (!habit) return;
 
       if (type === EventType.DELIVERED) {
+        const notifId = notification?.id;
+        if (notifId) {
+          if (handledNotificationIds.current.has(notifId)) return;
+          handledNotificationIds.current.add(notifId);
+        }
         setAlarmModal({ habit });
         return;
       }
