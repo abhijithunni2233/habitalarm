@@ -334,6 +334,19 @@ function getRate(logs, id, days = 7) {
   return Math.round((count / days) * 100);
 }
 
+// Overall consistency % across all habits over the trailing window, rest-day aware.
+function getConsistency(habits, logs, days) {
+  if (habits.length === 0) return 0;
+  let totalDone = 0, totalActive = 0;
+  const today = getTodayKey();
+  for (let i = 0; i < days; i++) {
+    const key = addDaysKey(today, -i);
+    const { done, active } = getDayCompletion(habits, logs, key);
+    totalDone += done; totalActive += active;
+  }
+  return totalActive > 0 ? Math.round((totalDone / totalActive) * 100) : 0;
+}
+
 // Completion % for a single date, accounting for rest days and measurable targets
 function getDayCompletion(habits, logs, dateKey) {
   const dayIdx = new Date(dateKey + 'T00:00:00').getDay();
@@ -353,6 +366,193 @@ function getDayCompletion(habits, logs, dateKey) {
 function fmtAlarm(a) {
   const h = a.hour, m = String(a.minute).padStart(2, '0'), p = h >= 12 ? 'PM' : 'AM', dh = h === 0 ? 12 : h > 12 ? h - 12 : h;
   return `${dh}:${m} ${p}`;
+}
+
+// ─── Nutrition: built-in food database (macros per stated serving) ───
+// cal/protein/fat/carbs/fiber in grams (kcal for cal). Sourced from common USDA-style averages.
+const FOOD_DB = [
+  { name: 'Rice, cooked', serving: '100g', cal: 130, protein: 2.7, fat: 0.3, carbs: 28, fiber: 0.4 },
+  { name: 'Chicken breast, cooked', serving: '100g', cal: 165, protein: 31, fat: 3.6, carbs: 0, fiber: 0 },
+  { name: 'Egg', serving: '1 large', cal: 78, protein: 6, fat: 5, carbs: 0.6, fiber: 0 },
+  { name: 'Banana', serving: '1 medium', cal: 105, protein: 1.3, fat: 0.4, carbs: 27, fiber: 3.1 },
+  { name: 'Apple', serving: '1 medium', cal: 95, protein: 0.5, fat: 0.3, carbs: 25, fiber: 4.4 },
+  { name: 'Broccoli', serving: '100g', cal: 34, protein: 2.8, fat: 0.4, carbs: 7, fiber: 2.6 },
+  { name: 'Oats, dry', serving: '100g', cal: 389, protein: 17, fat: 7, carbs: 66, fiber: 10 },
+  { name: 'Milk', serving: '1 cup', cal: 149, protein: 8, fat: 8, carbs: 12, fiber: 0 },
+  { name: 'Greek yogurt', serving: '170g', cal: 100, protein: 17, fat: 0.7, carbs: 6, fiber: 0 },
+  { name: 'Almonds', serving: '28g', cal: 164, protein: 6, fat: 14, carbs: 6, fiber: 3.5 },
+  { name: 'Bread, whole wheat', serving: '1 slice', cal: 69, protein: 3.6, fat: 1, carbs: 12, fiber: 1.9 },
+  { name: 'Peanut butter', serving: '2 tbsp', cal: 188, protein: 8, fat: 16, carbs: 6, fiber: 2 },
+  { name: 'Salmon, cooked', serving: '100g', cal: 208, protein: 20, fat: 13, carbs: 0, fiber: 0 },
+  { name: 'Sweet potato', serving: '100g', cal: 86, protein: 1.6, fat: 0.1, carbs: 20, fiber: 3 },
+  { name: 'Lentils / Dal, cooked', serving: '100g', cal: 116, protein: 9, fat: 0.4, carbs: 20, fiber: 8 },
+  { name: 'Paneer', serving: '100g', cal: 265, protein: 18, fat: 20, carbs: 6, fiber: 0 },
+  { name: 'Chapati / Roti', serving: '1 piece', cal: 104, protein: 3, fat: 2.5, carbs: 18, fiber: 2 },
+  { name: 'Idli', serving: '1 piece', cal: 39, protein: 1.5, fat: 0.1, carbs: 8, fiber: 0.4 },
+  { name: 'Dosa', serving: '1 piece', cal: 133, protein: 3, fat: 3.7, carbs: 22, fiber: 1 },
+  { name: 'Curd / Plain yogurt', serving: '100g', cal: 61, protein: 3.5, fat: 3.3, carbs: 4.7, fiber: 0 },
+  { name: 'Spinach', serving: '100g', cal: 23, protein: 2.9, fat: 0.4, carbs: 3.6, fiber: 2.2 },
+  { name: 'Avocado', serving: '100g', cal: 160, protein: 2, fat: 15, carbs: 9, fiber: 7 },
+  { name: 'Orange', serving: '1 medium', cal: 62, protein: 1.2, fat: 0.2, carbs: 15, fiber: 3.1 },
+  { name: 'Potato, boiled', serving: '100g', cal: 87, protein: 1.9, fat: 0.1, carbs: 20, fiber: 1.8 },
+  { name: 'Pasta, cooked', serving: '100g', cal: 131, protein: 5, fat: 1.1, carbs: 25, fiber: 1.8 },
+  { name: 'Cheese, cheddar', serving: '28g', cal: 113, protein: 7, fat: 9, carbs: 0.4, fiber: 0 },
+  { name: 'Tofu', serving: '100g', cal: 76, protein: 8, fat: 4.8, carbs: 1.9, fiber: 0.3 },
+  { name: 'Beef, cooked', serving: '100g', cal: 250, protein: 26, fat: 15, carbs: 0, fiber: 0 },
+  { name: 'Cashews', serving: '28g', cal: 157, protein: 5, fat: 12, carbs: 9, fiber: 0.9 },
+  { name: 'Walnuts', serving: '28g', cal: 185, protein: 4.3, fat: 18, carbs: 3.9, fiber: 1.9 },
+  { name: 'Black coffee', serving: '1 cup', cal: 2, protein: 0.3, fat: 0, carbs: 0, fiber: 0 },
+  { name: 'Butter', serving: '1 tbsp', cal: 102, protein: 0.1, fat: 11.5, carbs: 0, fiber: 0 },
+  { name: 'Olive oil', serving: '1 tbsp', cal: 119, protein: 0, fat: 14, carbs: 0, fiber: 0 },
+  { name: 'Honey', serving: '1 tbsp', cal: 64, protein: 0.1, fat: 0, carbs: 17, fiber: 0 },
+  { name: 'Watermelon', serving: '100g', cal: 30, protein: 0.6, fat: 0.2, carbs: 8, fiber: 0.4 },
+  { name: 'Cucumber', serving: '100g', cal: 15, protein: 0.7, fat: 0.1, carbs: 3.6, fiber: 0.5 },
+  { name: 'Tomato', serving: '100g', cal: 18, protein: 0.9, fat: 0.2, carbs: 3.9, fiber: 1.2 },
+  { name: 'Carrot', serving: '100g', cal: 41, protein: 0.9, fat: 0.2, carbs: 10, fiber: 2.8 },
+  { name: 'Chickpeas, cooked', serving: '100g', cal: 164, protein: 9, fat: 2.6, carbs: 27, fiber: 8 },
+  { name: 'Kidney beans, cooked', serving: '100g', cal: 127, protein: 8.7, fat: 0.5, carbs: 22.8, fiber: 6.4 },
+  { name: 'Quinoa, cooked', serving: '100g', cal: 120, protein: 4.4, fat: 1.9, carbs: 21, fiber: 2.8 },
+  { name: 'Soda / Cola', serving: '330ml can', cal: 139, protein: 0, fat: 0, carbs: 35, fiber: 0 },
+  { name: 'French fries', serving: '100g', cal: 312, protein: 3.4, fat: 15, carbs: 41, fiber: 3.8 },
+  // Kerala cuisine — estimates for typical home-style preparation; actual macros vary by recipe/oil used.
+  { name: 'Puttu', serving: '1 cup (100g)', cal: 130, protein: 2.5, fat: 1, carbs: 28, fiber: 1.5 },
+  { name: 'Kadala curry', serving: '1 cup (150g)', cal: 180, protein: 8, fat: 7, carbs: 22, fiber: 7 },
+  { name: 'Appam / Vellappam', serving: '1 piece', cal: 120, protein: 2, fat: 2, carbs: 23, fiber: 0.5 },
+  { name: 'Kerala parotta', serving: '1 piece', cal: 280, protein: 5, fat: 12, carbs: 38, fiber: 1.5 },
+  { name: 'Idiyappam / String hoppers', serving: '1 piece', cal: 90, protein: 1.8, fat: 0.3, carbs: 20, fiber: 0.5 },
+  { name: 'Sambar', serving: '1 cup (200g)', cal: 120, protein: 6, fat: 3, carbs: 18, fiber: 5 },
+  { name: 'Rasam', serving: '1 cup (200g)', cal: 60, protein: 2, fat: 1.5, carbs: 10, fiber: 1.5 },
+  { name: 'Avial', serving: '1 cup (150g)', cal: 150, protein: 4, fat: 9, carbs: 15, fiber: 4 },
+  { name: 'Cabbage thoran', serving: '100g', cal: 90, protein: 2.5, fat: 6, carbs: 8, fiber: 3 },
+  { name: 'Beans thoran', serving: '100g', cal: 95, protein: 3, fat: 6, carbs: 9, fiber: 3.5 },
+  { name: 'Olan', serving: '1 cup (150g)', cal: 110, protein: 2, fat: 8, carbs: 9, fiber: 2 },
+  { name: 'Kerala fish curry (meen curry)', serving: '150g', cal: 220, protein: 20, fat: 13, carbs: 6, fiber: 1 },
+  { name: 'Fish fry (meen varuthathu)', serving: '100g', cal: 220, protein: 22, fat: 14, carbs: 4, fiber: 0.5 },
+  { name: 'Nadan chicken curry', serving: '150g', cal: 260, protein: 22, fat: 17, carbs: 6, fiber: 1 },
+  { name: 'Beef ularthiyathu (beef fry)', serving: '100g', cal: 280, protein: 24, fat: 19, carbs: 4, fiber: 0.5 },
+  { name: 'Egg curry, Kerala style', serving: '150g', cal: 180, protein: 9, fat: 13, carbs: 6, fiber: 1 },
+  { name: 'Kappa (tapioca), boiled', serving: '100g', cal: 160, protein: 1.4, fat: 0.3, carbs: 38, fiber: 1.8 },
+  { name: 'Semiya payasam', serving: '1 cup (200g)', cal: 250, protein: 5, fat: 8, carbs: 40, fiber: 0.5 },
+  { name: 'Ada pradhaman', serving: '1 cup (200g)', cal: 320, protein: 4, fat: 12, carbs: 50, fiber: 1 },
+  { name: 'Palada payasam', serving: '1 cup (200g)', cal: 280, protein: 6, fat: 9, carbs: 44, fiber: 0.3 },
+  { name: 'Banana chips (upperi)', serving: '30g', cal: 160, protein: 1, fat: 10, carbs: 17, fiber: 1.5 },
+  { name: 'Sharkara varatti', serving: '30g', cal: 140, protein: 0.8, fat: 6, carbs: 22, fiber: 1 },
+  { name: 'Pazham pori (banana fritter)', serving: '1 piece', cal: 150, protein: 1.5, fat: 8, carbs: 19, fiber: 1 },
+  { name: 'Unniyappam', serving: '1 piece', cal: 80, protein: 1, fat: 3, carbs: 13, fiber: 0.5 },
+  { name: 'Pulissery / Moru curry', serving: '1 cup (200g)', cal: 100, protein: 4, fat: 5, carbs: 10, fiber: 1.5 },
+  { name: 'Erissery', serving: '1 cup (150g)', cal: 140, protein: 4, fat: 6, carbs: 18, fiber: 4 },
+  { name: 'Kalan', serving: '1 cup (150g)', cal: 130, protein: 4, fat: 7, carbs: 14, fiber: 2 },
+  { name: 'Coconut chutney', serving: '2 tbsp', cal: 70, protein: 1, fat: 6, carbs: 3, fiber: 1.5 },
+  { name: 'Puzhukku (mixed root veg)', serving: '150g', cal: 160, protein: 3, fat: 6, carbs: 24, fiber: 4 },
+  { name: 'Karimeen fry', serving: '100g', cal: 200, protein: 21, fat: 12, carbs: 3, fiber: 0.3 },
+  { name: 'Prawns / Chemmeen curry', serving: '150g', cal: 190, protein: 18, fat: 10, carbs: 6, fiber: 1 },
+  { name: 'Malabar biryani', serving: '1 plate (250g)', cal: 480, protein: 20, fat: 18, carbs: 58, fiber: 2 },
+  { name: 'Neyyappam', serving: '1 piece', cal: 110, protein: 1, fat: 5, carbs: 15, fiber: 0.4 },
+  { name: 'Chakka varattiyathu (jackfruit jam)', serving: '30g', cal: 90, protein: 0.5, fat: 1, carbs: 20, fiber: 1 },
+  { name: 'Ela ada', serving: '1 piece', cal: 120, protein: 1.5, fat: 3, carbs: 22, fiber: 1 },
+  { name: 'Kozhukatta', serving: '1 piece', cal: 70, protein: 1, fat: 2, carbs: 12, fiber: 0.8 },
+  { name: 'Kerala kanji (rice porridge)', serving: '1 cup (200g)', cal: 110, protein: 2, fat: 0.5, carbs: 24, fiber: 0.5 },
+  { name: 'Cherupayar curry (green gram)', serving: '150g', cal: 130, protein: 8, fat: 3, carbs: 18, fiber: 6 },
+  { name: 'Beetroot pachadi', serving: '100g', cal: 80, protein: 2, fat: 4, carbs: 9, fiber: 2 },
+  { name: 'Meen pollichathu', serving: '150g', cal: 230, protein: 22, fat: 14, carbs: 4, fiber: 0.5 },
+];
+
+const ACTIVITY_LEVELS = [
+  { id: 'sedentary', label: 'Sedentary', desc: 'Little or no exercise', mult: 1.2 },
+  { id: 'light', label: 'Lightly active', desc: 'Exercise 1-3 days/week', mult: 1.375 },
+  { id: 'moderate', label: 'Moderately active', desc: 'Exercise 3-5 days/week', mult: 1.55 },
+  { id: 'active', label: 'Very active', desc: 'Exercise 6-7 days/week', mult: 1.725 },
+  { id: 'veryActive', label: 'Extremely active', desc: 'Hard exercise + physical job', mult: 1.9 },
+];
+
+const NUTRITION_GOALS = [
+  { id: 'lose', label: 'Lose weight', delta: -500 },
+  { id: 'maintain', label: 'Maintain weight', delta: 0 },
+  { id: 'gain', label: 'Gain weight', delta: 300 },
+];
+
+const MEALS = [
+  { id: 'breakfast', label: 'Breakfast', icon: '🌅' },
+  { id: 'lunch', label: 'Lunch', icon: '🍛' },
+  { id: 'dinner', label: 'Dinner', icon: '🌙' },
+  { id: 'snack', label: 'Snack', icon: '🍎' },
+];
+
+// Mifflin-St Jeor BMR → TDEE → macro targets, adjusted for stated goal.
+function calcNutritionTargets(profile) {
+  if (!profile) return null;
+  const { sex, age, heightCm, weightKg, activityLevel, goal } = profile;
+  const bmr = sex === 'female'
+    ? 10 * weightKg + 6.25 * heightCm - 5 * age - 161
+    : 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+  const mult = ACTIVITY_LEVELS.find(a => a.id === activityLevel)?.mult || 1.375;
+  const tdee = bmr * mult;
+  const delta = NUTRITION_GOALS.find(g => g.id === goal)?.delta || 0;
+  const calories = Math.round(tdee + delta);
+  const protein = Math.round(weightKg * 1.6);
+  const fat = Math.round((calories * 0.25) / 9);
+  const proteinCal = protein * 4, fatCal = fat * 9;
+  const carbs = Math.max(0, Math.round((calories - proteinCal - fatCal) / 4));
+  const fiber = Math.round((calories / 1000) * 14);
+  return { calories, protein, fat, carbs, fiber };
+}
+
+function sumNutrition(entries) {
+  return (entries || []).reduce((acc, e) => ({
+    cal: acc.cal + (e.cal || 0), protein: acc.protein + (e.protein || 0),
+    fat: acc.fat + (e.fat || 0), carbs: acc.carbs + (e.carbs || 0), fiber: acc.fiber + (e.fiber || 0),
+  }), { cal: 0, protein: 0, fat: 0, carbs: 0, fiber: 0 });
+}
+
+// How rich/oily a food is, derived from the % of its calories that come from fat —
+// works for every item including custom entries, no manual tagging needed.
+function getOilLevel(cal, fat) {
+  if (!cal || cal <= 0) return null;
+  const fatPct = Math.round((fat * 9 / cal) * 100);
+  if (fatPct >= 45) return { label: 'High fat', emoji: '🔴', pct: fatPct };
+  if (fatPct >= 25) return { label: 'Medium fat', emoji: '🟡', pct: fatPct };
+  return { label: 'Low fat', emoji: '🟢', pct: fatPct };
+}
+
+// ─── AI Coach: calls the user's own free Gemini API key directly (no backend). ───
+async function callGemini(apiKey, model, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || `Gemini request failed (${res.status})`);
+  const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text).join('').trim();
+  if (!text) throw new Error('Gemini returned an empty response.');
+  return text;
+}
+
+function buildAICoachPrompt(habits, logs, moods, foodLog, bodyProfile) {
+  const today = getTodayKey();
+  const habitLines = habits.map(h => `- ${h.name}: ${getRate(logs, h.id, 7)}% done last 7 days, ${getStreak(logs, h.id)}-day current streak`).join('\n') || 'No habits tracked yet.';
+  const moodVals = Object.values(moods).slice(-7);
+  const avgMood = moodVals.length ? (moodVals.reduce((a, b) => a + b, 0) / moodVals.length).toFixed(1) : 'n/a';
+  const targets = calcNutritionTargets(bodyProfile);
+  const todayFood = sumNutrition(foodLog?.[today]);
+  const foodLine = targets
+    ? `Today's food so far: ${Math.round(todayFood.cal)} kcal (target ${targets.calories}), protein ${Math.round(todayFood.protein)}g (target ${targets.protein}g), fat ${Math.round(todayFood.fat)}g (target ${targets.fat}g), carbs ${Math.round(todayFood.carbs)}g (target ${targets.carbs}g), fiber ${Math.round(todayFood.fiber)}g (target ${targets.fiber}g).`
+    : 'No body profile / food log set up yet.';
+  return `You are a supportive personal habit and nutrition coach. Based on this user's real data, give short, specific, encouraging advice.
+
+HABITS (last 7 days):
+${habitLines}
+
+Average mood (last 7 entries, 1-5 scale): ${avgMood}
+
+NUTRITION:
+${foodLine}
+
+Respond with two short sections:
+1. "Do today" — 2-3 concrete, specific actions.
+2. "Avoid today" — 1-2 things to watch out for or cut back on.
+Keep the whole response under 130 words, plain text, no markdown headers, use simple dashes for bullets. Be warm but direct. This is general wellness guidance, not medical advice.`;
 }
 
 const Store = {
@@ -890,7 +1090,7 @@ function DateSelector({ selectedDate, onSelectDate, habits, logs }) {
 }
 
 // ─── HabitCard component (clean, no duplicate inline render) ───
-function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, remarks, user, expandedHabit, setExpandedHabit, addingTaskFor, setAddingTaskFor, newTaskText, setNewTaskText, toggle, toggleTodoLog, togglePin, deleteTodo, addTodo, getDailyTodos, onHabitDetail, reorder, setLogs, setUser }) {
+function HabitCard({ h, logs, selectedDate, dayIdx, todos, todoLogs, remarks, user, expandedHabit, setExpandedHabit, addingTaskFor, setAddingTaskFor, newTaskText, setNewTaskText, toggle, toggleTodoLog, togglePin, deleteTodo, addTodo, getDailyTodos, onHabitDetail, setLogs, setUser }) {
   const status = logs[selectedDate]?.[h.id];
   const isCompleted = status === true;
   const isNotDone = status === 'notdone';
@@ -976,17 +1176,9 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
           <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>Not done</Text>
         </View>
         <Animated.View {...panResponder.panHandlers} style={[st.habitCard, { borderLeftWidth: 4, borderLeftColor: isNotDone ? C.danger : bg, backgroundColor: isNotDone ? '#F9F9F9' : C.card, opacity: isNotDone ? 0.75 : 1 }, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
-          <TouchableOpacity
-            onLongPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-              Alert.alert('↕️ Move Habit', `Move "${h.name}" to:`, [
-                ...habits.map((_, j) => j !== i ? { text: `Position ${j + 1} — ${habits[j].name}`, onPress: () => { const arr = [...habits]; const [item] = arr.splice(i, 1); arr.splice(j, 0, item); reorder(arr); } } : null).filter(Boolean),
-                { text: 'Cancel', style: 'cancel' },
-              ]);
-            }}
-            style={[st.habitIconWrap, { backgroundColor: bg + '22' }]}>
+          <View style={[st.habitIconWrap, { backgroundColor: bg + '22' }]}>
             <Text style={{ fontSize: 24 }}>{isNotDone ? '❌' : h.icon}</Text>
-          </TouchableOpacity>
+          </View>
           <TouchableOpacity style={{ flex: 1, marginLeft: 10 }} onPress={() => setExpandedHabit(expandedHabit === h.id ? null : h.id)}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={[st.habitName, isNotDone && { textDecorationLine: 'line-through', opacity: 0.7 }]}>{h.name}</Text>
@@ -1042,13 +1234,13 @@ function HabitCard({ h, i, habits, logs, selectedDate, dayIdx, todos, todoLogs, 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 }}>
               <TouchableOpacity onPress={() => handleMeasurableDelta(-measurableIncrement)}
                 disabled={measurableCount <= 0}
-                style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 12, width: 34, height: 34, alignItems: 'center', justifyContent: 'center', opacity: measurableCount <= 0 ? 0.4 : 1 }}>
-                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 17 }}>−</Text>
+                style={{ backgroundColor: bg + '20', borderRadius: 12, width: 34, height: 34, alignItems: 'center', justifyContent: 'center', opacity: measurableCount <= 0 ? 0.4 : 1 }}>
+                <Text style={{ color: bg, fontWeight: '900', fontSize: 17 }}>−</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => handleMeasurableDelta(measurableIncrement)}
-                style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 13 }}>+{measurableIncrement}</Text>
-                <Text style={{ color: 'rgba(255,255,255,0.80)', fontSize: 9, fontWeight: '700' }}>{h.unit || 'unit'}</Text>
+                style={{ backgroundColor: bg + '20', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: bg, fontWeight: '900', fontSize: 13 }}>+{measurableIncrement}</Text>
+                <Text style={{ color: bg, opacity: 0.8, fontSize: 9, fontWeight: '700' }}>{h.unit || 'unit'}</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -1141,6 +1333,8 @@ function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTo
   const todayMood = moods[selectedDate] || null;
   const info = getLevelInfo(user.xp);
   const pct = active.length > 0 ? Math.round((done / active.length) * 100) : 0;
+  const consistency7 = getConsistency(habits, logs, 7);
+  const consistency30 = getConsistency(habits, logs, 30);
 
   const [expandedHabit, setExpandedHabit] = useState(null);
   const [newTaskText, setNewTaskText] = useState('');
@@ -1213,11 +1407,6 @@ function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTo
     const nm = { ...moods, [selectedDate]: v };
     setMoods(nm);
     await Store.set('moods', nm);
-  };
-
-  const reorder = async (newHabits) => {
-    setHabits(newHabits);
-    await Store.set('habits', newHabits);
   };
 
  // AFTER
@@ -1366,6 +1555,16 @@ const getDailyTodos = (habitId) => {
             </View>
           </View>
         </View>
+        {habits.length > 0 && (
+          <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 16 }}>
+            {[{ v: consistency7, l: '7-Day Consistency' }, { v: consistency30, l: '30-Day Consistency' }].map((x, i) => (
+              <View key={i} style={{ flex: 1, backgroundColor: C.card, borderRadius: 16, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: C.border, elevation: 2, shadowColor: C.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 }}>
+                <Text style={{ fontSize: 22, fontWeight: '900', color: x.v >= 80 ? C.success : x.v >= 50 ? C.gold : C.danger }}>{x.v}%</Text>
+                <Text style={{ fontSize: 11, color: C.textSub, marginTop: 2, fontWeight: '700' }}>{x.l}</Text>
+              </View>
+            ))}
+          </View>
+        )}
         <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
           <Text style={st.secTitle}>How are you feeling?</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
@@ -1378,7 +1577,7 @@ const getDailyTodos = (habitId) => {
         </View>
         <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
           <Text style={st.secTitle}>Habits</Text>
-          <Text style={{ fontSize: 11, color: C.textMuted, marginTop: -6 }}>Long-press icon to reorder · Swipe left to mark not done</Text>
+          <Text style={{ fontSize: 11, color: C.textMuted, marginTop: -6 }}>Swipe left to mark not done</Text>
         </View>
         {habits.length === 0 && (
           <TouchableOpacity onPress={onAddHabit} style={st.empty}>
@@ -1388,9 +1587,9 @@ const getDailyTodos = (habitId) => {
           </TouchableOpacity>
         )}
         {/* ─── BUG FIX: only one habits.map, using HabitCard component, no duplicate inline render ─── */}
-        {habits.map((h, i) => (
+        {habits.map(h => (
           <HabitCard
-            key={h.id} h={h} i={i} habits={habits} logs={logs}
+            key={h.id} h={h} logs={logs}
             selectedDate={selectedDate} dayIdx={dayIdx}
             todos={todos} todoLogs={todoLogs} remarks={remarks} user={user}
             expandedHabit={expandedHabit} setExpandedHabit={setExpandedHabit}
@@ -1399,7 +1598,7 @@ const getDailyTodos = (habitId) => {
             toggle={toggle} toggleTodoLog={toggleTodoLog}
             togglePin={togglePin} deleteTodo={deleteTodo} addTodo={addTodo}
             getDailyTodos={getDailyTodos} onHabitDetail={onHabitDetail}
-            reorder={reorder} setLogs={setLogs} setUser={setUser}
+            setLogs={setLogs} setUser={setUser}
           />
         ))}
         <View style={{ alignItems: 'center', paddingVertical: 32, paddingHorizontal: 16 }}>
@@ -1440,6 +1639,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
   const [dailyTarget, setDailyTarget] = useState(existing?.dailyTarget ? String(existing.dailyTarget) : '');
   const [increment, setIncrement] = useState(existing?.increment ? String(existing.increment) : '1');
   const [categories, setCategories] = useState(existing?.categories || []);
+  const [restDays, setRestDays] = useState(existing?.restDays || []);
   const [reminderOn, setReminderOn] = useState(existing?.alarms?.length > 0);
   const [alarms, setAlarms] = useState(existing?.alarms || [{ hour: 9, minute: 0 }]);
   const [showPicker, setShowPicker] = useState(false);
@@ -1494,6 +1694,10 @@ function AddHabitScreen({ existing, onSave, onBack }) {
     Haptics.selectionAsync();
     setCategories(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
   };
+  const toggleRestDay = (idx) => {
+    Haptics.selectionAsync();
+    setRestDays(p => p.includes(idx) ? p.filter(x => x !== idx) : [...p, idx]);
+  };
   const handleTimeChange = (event, date) => {
     if (Platform.OS === 'android') setShowPicker(false);
     if (event.type === 'dismissed' || !date) return;
@@ -1511,7 +1715,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
       dailyTarget: habitType === 'measurable' ? (dailyTarget ? parseFloat(dailyTarget) : null) : null,
       increment: habitType === 'measurable' ? (increment ? parseFloat(increment) : 1) : null,
       categories: habitType === 'measurable' ? categories : [],
-      restDays: existing?.restDays || [],
+      restDays,
       duration: existing?.duration || 0,
       alarms: finalAlarms,
       highPriority,
@@ -1694,6 +1898,22 @@ function AddHabitScreen({ existing, onSave, onBack }) {
           </>
         )}
         <View style={{ height: 1, backgroundColor: C.border, marginVertical: 28 }} />
+        <Text style={{ fontSize: 18, fontWeight: '900', color: C.text, marginBottom: 6 }}>😴 Rest Days</Text>
+        <Text style={{ fontSize: 13, color: C.textMuted, marginBottom: 14, lineHeight: 19 }}>
+          Days you don't need to do this habit. They won't count against your streak or completion rate.
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          {DAYS_SHORT.map((d, idx) => {
+            const sel = restDays.includes(idx);
+            return (
+              <TouchableOpacity key={idx} onPress={() => toggleRestDay(idx)}
+                style={[st.dayBtn, sel && { backgroundColor: C.primary + '18', borderColor: C.primary }]}>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: sel ? C.primary : C.textSub }}>{d}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <View style={{ height: 1, backgroundColor: C.border, marginVertical: 28 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flex: 1, marginRight: 16 }}>
             <Text style={{ fontSize: 18, fontWeight: '900', color: C.text }}>⚡ High Priority</Text>
@@ -1757,11 +1977,14 @@ function buildMonthMatrixHtml(habits, logs, year, month) {
     const cells = Array.from({ length: daysInMonth }, (_, i) => {
       const d = i + 1;
       const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dayIdx = new Date(key + 'T00:00:00').getDay();
+      const isRest = !!h.restDays?.includes(dayIdx);
       const status = logs[key]?.[h.id];
       const isMeas = h.habitType === 'measurable';
       let content = '';
       let cls = 'blank';
-      if (isMeas) {
+      if (isRest) { content = '&#128564;'; cls = 'rest'; }
+      else if (isMeas) {
         if (typeof status === 'number' && status > 0) {
           const done = h.dailyTarget ? status >= h.dailyTarget : true;
           content = String(status);
@@ -1780,19 +2003,22 @@ function buildMonthMatrixHtml(habits, logs, year, month) {
       h1 { font-size: 20px; margin: 0 0 2px; }
       .sub { font-size: 11px; color: #6B6490; margin-bottom: 16px; }
       table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+      thead { display: table-header-group; }
+      tr { page-break-inside: avoid; break-inside: avoid; }
       th, td { border: 1px solid #E2DCF8; text-align: center; font-size: 9px; padding: 4px 2px; }
       th { background: #EDE9FF; color: #6B6490; font-weight: 700; }
-      td.habit { text-align: left; font-weight: 700; font-size: 10px; width: 130px; white-space: nowrap; overflow: hidden; }
-      td.done { background: #E6FBF5; color: #06D6A0; font-weight: 900; }
-      td.notdone { background: #FFF0F0; color: #FF6B6B; font-weight: 900; }
-      td.partial { background: #FFF7E6; color: #F4A021; font-weight: 900; }
+      td.habit { text-align: left; font-weight: 700; font-size: 10px; width: 150px; word-wrap: break-word; overflow-wrap: break-word; }
+      td.done { background: #0B7A4B; color: #FFFFFF; font-weight: 900; }
+      td.notdone { background: #A3231C; color: #FFFFFF; font-weight: 900; }
+      td.partial { background: #B4590A; color: #FFFFFF; font-weight: 900; }
+      td.rest { background: #4B5264; color: #FFFFFF; font-weight: 900; font-size: 8px; }
       .footer { margin-top: 16px; font-size: 9px; color: #B0A8CC; text-align: center; }
     </style></head>
     <body>
       <h1>Hadbit — ${monthLabel}</h1>
       <div class="sub">Habit completion matrix · exported ${getDateStr(getTodayKey())}</div>
       <table>
-        <thead><tr><th style="text-align:left;">Habit</th>${dayCols}</tr></thead>
+        <thead><tr><th style="text-align:left; width:150px;">Habit</th>${dayCols}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="footer">Generated by Hadbit</div>
@@ -1982,6 +2208,7 @@ function StatsScreen({ habits, logs, moods, onMonthly }) {
                 {habits.map(h => (
                   <View key={h.id} style={{ flexDirection: 'row', height: 36, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: C.border }}>
                     {dayKeys.map(dk => {
+                      const isRest = !!h.restDays?.includes(new Date(dk.key + 'T00:00:00').getDay());
                       const status = logs[dk.key]?.[h.id];
                       const isMeas = h.habitType === 'measurable';
                       const done = isMeas
@@ -1989,15 +2216,17 @@ function StatsScreen({ habits, logs, moods, onMonthly }) {
                         : status === true;
                       const notdone = status === 'notdone';
                       const measCount = isMeas && typeof status === 'number' ? status : null;
-                      const cellColor = done ? (h.color || C.primary) : notdone ? C.danger + '44' : C.section;
+                      const cellColor = isRest ? C.textMuted + '33' : done ? (h.color || C.primary) : notdone ? C.danger + '44' : C.section;
                       return (
                         <View key={dk.key} style={{ width: 36, alignItems: 'center' }}>
-                          <View style={[{ width: 24, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }, { backgroundColor: cellColor }, dk.isToday && !done && !notdone && { borderWidth: 1.5, borderColor: C.primary + '50' }]}>
-                            {isMeas && measCount !== null && measCount > 0
-                              ? <Text style={{ fontSize: 9, color: done ? '#fff' : C.textSub, fontWeight: '900' }}>{measCount >= 1000 ? `${(measCount / 1000).toFixed(1)}k` : measCount}</Text>
-                              : done ? <Text style={{ fontSize: 12, color: '#fff', fontWeight: '900' }}>✓</Text>
-                                : notdone ? <Text style={{ fontSize: 12, color: C.danger, fontWeight: '900' }}>✕</Text>
-                                  : null
+                          <View style={[{ width: 24, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }, { backgroundColor: cellColor }, dk.isToday && !done && !notdone && !isRest && { borderWidth: 1.5, borderColor: C.primary + '50' }]}>
+                            {isRest
+                              ? <Text style={{ fontSize: 10 }}>😴</Text>
+                              : isMeas && measCount !== null && measCount > 0
+                                ? <Text style={{ fontSize: 9, color: done ? '#fff' : C.textSub, fontWeight: '900' }}>{measCount >= 1000 ? `${(measCount / 1000).toFixed(1)}k` : measCount}</Text>
+                                : done ? <Text style={{ fontSize: 12, color: '#fff', fontWeight: '900' }}>✓</Text>
+                                  : notdone ? <Text style={{ fontSize: 12, color: C.danger, fontWeight: '900' }}>✕</Text>
+                                    : null
                             }
                           </View>
                         </View>
@@ -2039,13 +2268,14 @@ function StatsScreen({ habits, logs, moods, onMonthly }) {
                 </View>
                 <View style={{ flexDirection: 'row', gap: 4, marginVertical: 6 }}>
                   {last7.map(dk => {
+                    const isRest = !!h.restDays?.includes(new Date(dk.key + 'T00:00:00').getDay());
                     const status = logs[dk.key]?.[h.id];
                     const isMeas = h.habitType === 'measurable';
                     const done = isMeas
                       ? (typeof status === 'number' && (h.dailyTarget ? status >= h.dailyTarget : status > 0))
                       : status === true;
                     const notdone = status === 'notdone';
-                    const cellColor = done ? (h.color || C.primary) : notdone ? C.danger + '55' : C.section;
+                    const cellColor = isRest ? C.textMuted + '33' : done ? (h.color || C.primary) : notdone ? C.danger + '55' : C.section;
                     return <View key={dk.key} style={{ flex: 1, height: 16, borderRadius: 4, backgroundColor: cellColor }} />;
                   })}
                 </View>
@@ -2173,10 +2403,419 @@ function GoalsScreen({ goals, setGoals }) {
   );
 }
 
-function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs, setMoods }) {
+function MacroBar({ label, value, target, color }) {
+  const pct = target > 0 ? Math.min(value / target, 1) : 0;
+  const over = target > 0 && value > target;
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+        <Text style={{ fontSize: 12, fontWeight: '700', color: C.text }}>{label}</Text>
+        <Text style={{ fontSize: 12, color: over ? C.danger : C.textSub, fontWeight: '700' }}>{Math.round(value)}g / {target}g{over ? ' ⚠️' : ''}</Text>
+      </View>
+      <View style={{ height: 8, backgroundColor: C.section, borderRadius: 99, overflow: 'hidden' }}>
+        <View style={{ height: '100%', width: `${pct * 100}%`, backgroundColor: over ? C.danger : color, borderRadius: 99 }} />
+      </View>
+    </View>
+  );
+}
+
+function BodyProfileForm({ existing, onSave, onCancel }) {
+  const [sex, setSex] = useState(existing?.sex || 'male');
+  const [age, setAge] = useState(existing?.age ? String(existing.age) : '');
+  const [heightCm, setHeightCm] = useState(existing?.heightCm ? String(existing.heightCm) : '');
+  const [weightKg, setWeightKg] = useState(existing?.weightKg ? String(existing.weightKg) : '');
+  const [activityLevel, setActivityLevel] = useState(existing?.activityLevel || 'light');
+  const [goal, setGoal] = useState(existing?.goal || 'maintain');
+  const valid = age && heightCm && weightKg && parseFloat(age) > 0 && parseFloat(heightCm) > 0 && parseFloat(weightKg) > 0;
+  const save = () => {
+    if (!valid) { Alert.alert('Missing details', 'Enter your age, height and weight to calculate your targets.'); return; }
+    onSave({ sex, age: parseFloat(age), heightCm: parseFloat(heightCm), weightKg: parseFloat(weightKg), activityLevel, goal });
+  };
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: C.bg }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
+      <LinearGradient colors={['#43AA8B', '#4CC9F0']} style={st.screenHeader} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        <Text style={st.screenHeaderTitle}>🍎 Body Details</Text>
+        <Text style={st.screenHeaderSub}>Used to calculate your daily calorie & macro targets</Text>
+      </LinearGradient>
+      <View style={{ paddingHorizontal: 16 }}>
+        <Text style={st.label}>Sex</Text>
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
+          {['male', 'female'].map(s => (
+            <TouchableOpacity key={s} onPress={() => setSex(s)}
+              style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1.5, borderColor: sex === s ? C.primary : C.border, backgroundColor: sex === s ? C.primary + '15' : C.card }}>
+              <Text style={{ fontWeight: '700', color: sex === s ? C.primary : C.text, textTransform: 'capitalize' }}>{s}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={st.label}>Age</Text>
+            <TextInput style={st.inputFull} value={age} onChangeText={setAge} placeholder="e.g. 28" placeholderTextColor={C.textMuted} keyboardType="numeric" maxLength={3} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={st.label}>Height (cm)</Text>
+            <TextInput style={st.inputFull} value={heightCm} onChangeText={setHeightCm} placeholder="e.g. 170" placeholderTextColor={C.textMuted} keyboardType="numeric" maxLength={3} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={st.label}>Weight (kg)</Text>
+            <TextInput style={st.inputFull} value={weightKg} onChangeText={setWeightKg} placeholder="e.g. 65" placeholderTextColor={C.textMuted} keyboardType="numeric" maxLength={5} />
+          </View>
+        </View>
+        <Text style={st.label}>Activity Level</Text>
+        <View style={{ marginBottom: 18 }}>
+          {ACTIVITY_LEVELS.map(a => (
+            <TouchableOpacity key={a.id} onPress={() => setActivityLevel(a.id)}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: activityLevel === a.id ? C.primary : C.border, backgroundColor: activityLevel === a.id ? C.primary + '15' : C.card, marginBottom: 8 }}>
+              <View>
+                <Text style={{ fontWeight: '700', color: activityLevel === a.id ? C.primary : C.text }}>{a.label}</Text>
+                <Text style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{a.desc}</Text>
+              </View>
+              {activityLevel === a.id && <Text style={{ color: C.primary, fontWeight: '900' }}>✓</Text>}
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={st.label}>Goal</Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 24 }}>
+          {NUTRITION_GOALS.map(g => (
+            <TouchableOpacity key={g.id} onPress={() => setGoal(g.id)}
+              style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1.5, borderColor: goal === g.id ? C.primary : C.border, backgroundColor: goal === g.id ? C.primary + '15' : C.card }}>
+              <Text style={{ fontWeight: '700', fontSize: 12, color: goal === g.id ? C.primary : C.text, textAlign: 'center' }}>{g.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity onPress={save}>
+          <LinearGradient colors={[C.primary, C.primaryLight]} style={{ borderRadius: 14, padding: 16, alignItems: 'center' }}>
+            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Calculate My Targets</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+        {existing && (
+          <TouchableOpacity onPress={onCancel} style={{ padding: 14, alignItems: 'center', marginTop: 8 }}>
+            <Text style={{ color: C.textMuted, fontWeight: '700' }}>Cancel</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+function AddFoodModal({ visible, onClose, onAdd }) {
+  const [mode, setMode] = useState('search');
+  const [meal, setMeal] = useState('breakfast');
+  const [search, setSearch] = useState('');
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [multiplier, setMultiplier] = useState('1');
+  const [customName, setCustomName] = useState('');
+  const [customCal, setCustomCal] = useState('');
+  const [customProtein, setCustomProtein] = useState('');
+  const [customFat, setCustomFat] = useState('');
+  const [customCarbs, setCustomCarbs] = useState('');
+  const [customFiber, setCustomFiber] = useState('');
+
+  useEffect(() => {
+    if (visible) {
+      setMode('search'); setSearch(''); setSelectedFood(null); setMultiplier('1');
+      setCustomName(''); setCustomCal(''); setCustomProtein(''); setCustomFat(''); setCustomCarbs(''); setCustomFiber('');
+    }
+  }, [visible]);
+
+  const results = search.trim() ? FOOD_DB.filter(f => f.name.toLowerCase().includes(search.trim().toLowerCase())) : FOOD_DB;
+
+  const add = () => {
+    if (mode === 'search') {
+      if (!selectedFood) return;
+      const m = parseFloat(multiplier) || 1;
+      onAdd({
+        id: `f_${Date.now()}`, meal,
+        name: `${selectedFood.name}${m !== 1 ? ` (×${m})` : ''}`,
+        cal: selectedFood.cal * m, protein: selectedFood.protein * m,
+        fat: selectedFood.fat * m, carbs: selectedFood.carbs * m, fiber: selectedFood.fiber * m,
+      });
+    } else {
+      if (!customName.trim() || !customCal) { Alert.alert('Missing info', 'Enter at least a name and calories.'); return; }
+      onAdd({
+        id: `f_${Date.now()}`, meal, name: customName.trim(),
+        cal: parseFloat(customCal) || 0, protein: parseFloat(customProtein) || 0,
+        fat: parseFloat(customFat) || 0, carbs: parseFloat(customCarbs) || 0, fiber: parseFloat(customFiber) || 0,
+      });
+    }
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={rm.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={[rm.sheet, { maxHeight: '85%' }]}>
+          <LinearGradient colors={['#43AA8B', '#4CC9F0']} style={rm.sheetHeader}>
+            <Text style={rm.sheetTitle}>🍽️ Add Food</Text>
+          </LinearGradient>
+          <ScrollView style={{ padding: 20 }} contentContainerStyle={{ paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+              {MEALS.map(m => (
+                <TouchableOpacity key={m.id} onPress={() => setMeal(m.id)}
+                  style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: meal === m.id ? C.primary : C.border, backgroundColor: meal === m.id ? C.primary + '15' : C.card }}>
+                  <Text style={{ fontSize: 16 }}>{m.icon}</Text>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: meal === m.id ? C.primary : C.textSub, marginTop: 2 }}>{m.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+              {[{ id: 'search', l: '🔍 Search Food' }, { id: 'custom', l: '✏️ Custom Entry' }].map(t => (
+                <TouchableOpacity key={t.id} onPress={() => setMode(t.id)}
+                  style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: mode === t.id ? C.primary : C.border, backgroundColor: mode === t.id ? C.primary + '15' : C.card }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: mode === t.id ? C.primary : C.text }}>{t.l}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {mode === 'search' ? (
+              <>
+                <TextInput style={st.inputFull} value={search} onChangeText={setSearch} placeholder="Search foods…" placeholderTextColor={C.textMuted} />
+                <View style={{ maxHeight: 220 }}>
+                  <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                    {results.map(f => {
+                      const oil = getOilLevel(f.cal, f.fat);
+                      return (
+                        <TouchableOpacity key={f.name} onPress={() => { Haptics.selectionAsync(); setSelectedFood(f); }}
+                          style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: selectedFood?.name === f.name ? C.primary + '15' : C.section, marginBottom: 6, borderWidth: selectedFood?.name === f.name ? 1.5 : 0, borderColor: C.primary }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: C.text }}>{f.name}</Text>
+                            <Text style={{ fontSize: 11, color: C.textMuted }}>{f.serving} · {f.cal} kcal · P{f.protein} F{f.fat} C{f.carbs} · Fi{f.fiber}</Text>
+                            {oil && <Text style={{ fontSize: 11, color: C.textSub, marginTop: 2 }}>{oil.emoji} {oil.label} ({oil.pct}% of kcal)</Text>}
+                          </View>
+                          {selectedFood?.name === f.name && <Text style={{ color: C.primary, fontWeight: '900' }}>✓</Text>}
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {results.length === 0 && <Text style={{ color: C.textMuted, textAlign: 'center', padding: 12 }}>No matches — try Custom Entry</Text>}
+                  </ScrollView>
+                </View>
+                {selectedFood && (
+                  <View style={{ marginTop: 12 }}>
+                    <Text style={st.label}>Servings (×{selectedFood.serving})</Text>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {['0.5', '1', '1.5', '2', '3'].map(v => (
+                        <TouchableOpacity key={v} onPress={() => setMultiplier(v)}
+                          style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: multiplier === v ? C.primary : C.border, backgroundColor: multiplier === v ? C.primary + '15' : C.card }}>
+                          <Text style={{ fontWeight: '700', color: multiplier === v ? C.primary : C.text }}>×{v}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </>
+            ) : (
+              <>
+                <TextInput style={st.inputFull} value={customName} onChangeText={setCustomName} placeholder="Food name" placeholderTextColor={C.textMuted} />
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput style={[st.inputFull, { flex: 1 }]} value={customCal} onChangeText={setCustomCal} placeholder="Calories" placeholderTextColor={C.textMuted} keyboardType="numeric" />
+                  <TextInput style={[st.inputFull, { flex: 1 }]} value={customProtein} onChangeText={setCustomProtein} placeholder="Protein g" placeholderTextColor={C.textMuted} keyboardType="numeric" />
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput style={[st.inputFull, { flex: 1 }]} value={customFat} onChangeText={setCustomFat} placeholder="Fat g" placeholderTextColor={C.textMuted} keyboardType="numeric" />
+                  <TextInput style={[st.inputFull, { flex: 1 }]} value={customCarbs} onChangeText={setCustomCarbs} placeholder="Carbs g" placeholderTextColor={C.textMuted} keyboardType="numeric" />
+                  <TextInput style={[st.inputFull, { flex: 1 }]} value={customFiber} onChangeText={setCustomFiber} placeholder="Fiber g" placeholderTextColor={C.textMuted} keyboardType="numeric" />
+                </View>
+              </>
+            )}
+            <TouchableOpacity onPress={add} style={{ marginTop: 10 }}>
+              <LinearGradient colors={['#43AA8B', '#4CC9F0']} style={{ borderRadius: 12, padding: 15, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Add to Log</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </ScrollView>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+function NutritionScreen({ foodLog, setFoodLog, bodyProfile, setBodyProfile }) {
+  const [date, setDate] = useState(getTodayKey());
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [showAddFood, setShowAddFood] = useState(false);
+  useEffect(() => { const handler = BackHandler.addEventListener('hardwareBackPress', () => false); return () => handler.remove(); }, []);
+
+  const saveProfile = async (profile) => {
+    setBodyProfile(profile);
+    await Store.set('bodyProfile', profile);
+    setEditingProfile(false);
+  };
+
+  if (!bodyProfile || editingProfile) {
+    return <BodyProfileForm existing={bodyProfile} onSave={saveProfile} onCancel={() => setEditingProfile(false)} />;
+  }
+
+  const targets = calcNutritionTargets(bodyProfile);
+  const entries = foodLog[date] || [];
+  const consumed = sumNutrition(entries);
+  const remaining = { cal: targets.calories - consumed.cal, protein: targets.protein - consumed.protein, fat: targets.fat - consumed.fat, carbs: targets.carbs - consumed.carbs, fiber: targets.fiber - consumed.fiber };
+  const overCal = consumed.cal > targets.calories;
+  const calPct = targets.calories > 0 ? Math.min(consumed.cal / targets.calories, 1) : 0;
+
+  const suggestions = (() => {
+    if (remaining.cal <= 50) return [];
+    return FOOD_DB
+      .filter(f => f.cal > 0 && f.cal <= remaining.cal + 30)
+      .map(f => ({ ...f, score: (remaining.protein > 0 ? (f.protein / f.cal) * 100 : 0) + (remaining.fiber > 0 ? (f.fiber / f.cal) * 40 : 0) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+  })();
+
+  const addFood = async (entry) => {
+    const nf = { ...foodLog, [date]: [...(foodLog[date] || []), entry] };
+    setFoodLog(nf);
+    await Store.set('foodLog', nf);
+  };
+  const deleteFood = async (id) => {
+    const nf = { ...foodLog, [date]: (foodLog[date] || []).filter(e => e.id !== id) };
+    setFoodLog(nf);
+    await Store.set('foodLog', nf);
+  };
+
+  return (
+    <View style={{ flex: 1 }}>
+      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+        <LinearGradient colors={['#43AA8B', '#4CC9F0']} style={st.screenHeader} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View>
+              <Text style={st.screenHeaderTitle}>🍎 Nutrition</Text>
+              <Text style={st.screenHeaderSub}>{getDateStr(date)}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setEditingProfile(true)} style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 99, padding: 10 }}>
+              <Text style={{ fontSize: 16 }}>⚙️</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+            <TouchableOpacity onPress={() => setDate(addDaysKey(date, -1))} style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 99, paddingHorizontal: 14, paddingVertical: 6 }}>
+              <Text style={{ color: '#fff', fontWeight: '700' }}>‹ Prev</Text>
+            </TouchableOpacity>
+            {date !== getTodayKey() && (
+              <TouchableOpacity onPress={() => setDate(getTodayKey())} style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 99, paddingHorizontal: 14, paddingVertical: 6 }}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Today</Text>
+              </TouchableOpacity>
+            )}
+            {date < getTodayKey() && (
+              <TouchableOpacity onPress={() => setDate(addDaysKey(date, 1))} style={{ backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 99, paddingHorizontal: 14, paddingVertical: 6 }}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Next ›</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </LinearGradient>
+        <View style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 16, backgroundColor: C.card, borderRadius: 20, padding: 16 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8 }}>
+            <View>
+              <Text style={{ fontSize: 28, fontWeight: '900', color: overCal ? C.danger : C.text }}>{Math.round(consumed.cal)}</Text>
+              <Text style={{ fontSize: 12, color: C.textSub }}>of {targets.calories} kcal</Text>
+            </View>
+            <Text style={{ fontSize: 14, fontWeight: '800', color: overCal ? C.danger : C.success }}>
+              {overCal ? `+${Math.round(consumed.cal - targets.calories)} over` : `${Math.round(targets.calories - consumed.cal)} left`}
+            </Text>
+          </View>
+          <View style={{ height: 10, backgroundColor: C.section, borderRadius: 99, overflow: 'hidden', marginBottom: 16 }}>
+            <View style={{ height: '100%', width: `${calPct * 100}%`, backgroundColor: overCal ? C.danger : '#43AA8B', borderRadius: 99 }} />
+          </View>
+          <MacroBar label="Protein" value={consumed.protein} target={targets.protein} color="#4F8EF7" />
+          <MacroBar label="Fat" value={consumed.fat} target={targets.fat} color={C.gold} />
+          <MacroBar label="Carbs" value={consumed.carbs} target={targets.carbs} color="#9B5DE5" />
+          <MacroBar label="Fiber" value={consumed.fiber} target={targets.fiber} color="#43AA8B" />
+        </View>
+        {suggestions.length > 0 && (
+          <View style={{ marginHorizontal: 16, marginBottom: 16, backgroundColor: C.successPale, borderRadius: 16, padding: 14 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: C.success, marginBottom: 8 }}>💡 Best to eat next</Text>
+            {suggestions.map(f => {
+              const oil = getOilLevel(f.cal, f.fat);
+              return (
+                <Text key={f.name} style={{ fontSize: 12, color: C.text, marginBottom: 4 }}>• {f.name} ({f.serving}) — {f.cal} kcal, {f.protein}g protein{oil ? ` · ${oil.emoji} ${oil.label}` : ''}</Text>
+              );
+            })}
+          </View>
+        )}
+        {overCal && (
+          <View style={{ marginHorizontal: 16, marginBottom: 16, backgroundColor: C.dangerPale, borderRadius: 16, padding: 14 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: C.danger }}>⚠️ You're over your calorie budget today</Text>
+            <Text style={{ fontSize: 12, color: C.text, marginTop: 4 }}>Consider a lighter, high-fiber meal for the rest of the day, or a short walk to balance it out.</Text>
+          </View>
+        )}
+        <View style={{ paddingHorizontal: 16, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={st.secTitle}>Food Log</Text>
+          <TouchableOpacity onPress={() => setShowAddFood(true)} style={{ backgroundColor: C.primary, borderRadius: 99, paddingHorizontal: 14, paddingVertical: 8 }}>
+            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>＋ Add Food</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={{ paddingHorizontal: 16 }}>
+          {entries.length === 0 && (
+            <View style={st.empty}>
+              <Text style={{ fontSize: 44 }}>🍽️</Text>
+              <Text style={st.emptySub}>No food logged for this day yet</Text>
+            </View>
+          )}
+          {MEALS.map(m => {
+            const mealEntries = entries.filter(e => e.meal === m.id);
+            if (mealEntries.length === 0) return null;
+            return (
+              <View key={m.id} style={{ marginBottom: 14 }}>
+                <Text style={{ fontSize: 12, fontWeight: '800', color: C.textMuted, marginBottom: 6, textTransform: 'uppercase' }}>{m.icon} {m.label}</Text>
+                {mealEntries.map(e => {
+                  const oil = getOilLevel(e.cal, e.fat);
+                  return (
+                  <View key={e.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: C.border }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: C.text }}>{e.name}</Text>
+                      <Text style={{ fontSize: 11, color: C.textMuted }}>{Math.round(e.cal)} kcal · P{Math.round(e.protein)} F{Math.round(e.fat)} C{Math.round(e.carbs)} Fi{Math.round(e.fiber)}</Text>
+                      {oil && <Text style={{ fontSize: 11, color: C.textSub, marginTop: 2 }}>{oil.emoji} {oil.label} ({oil.pct}% of kcal)</Text>}
+                    </View>
+                    <TouchableOpacity onPress={() => deleteFood(e.id)} style={{ backgroundColor: C.dangerPale, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+                      <Text style={{ color: C.danger, fontWeight: '700' }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                  );
+                })}
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+      <AddFoodModal visible={showAddFood} onClose={() => setShowAddFood(false)} onAdd={addFood} />
+    </View>
+  );
+}
+
+function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs, setMoods, foodLog, bodyProfile }) {
   const [editName, setEditName] = useState(false);
   const [tmpName, setTmpName] = useState('');
   const [showInsights, setShowInsights] = useState(false);
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('gemini-2.0-flash');
+  const [aiKeyInput, setAiKeyInput] = useState('');
+  const [editingAiKey, setEditingAiKey] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState('');
+  const [aiError, setAiError] = useState('');
+  useEffect(() => {
+    Store.get('aiSettings', null).then(s => {
+      if (s?.apiKey) { setAiApiKey(s.apiKey); setAiModel(s.model || 'gemini-2.0-flash'); }
+      else setEditingAiKey(true);
+    });
+  }, []);
+  const saveAiKey = async () => {
+    if (!aiKeyInput.trim()) return;
+    const settings = { apiKey: aiKeyInput.trim(), model: aiModel };
+    await Store.set('aiSettings', settings);
+    setAiApiKey(settings.apiKey);
+    setEditingAiKey(false);
+    setAiKeyInput('');
+  };
+  const askAiCoach = async () => {
+    setAiLoading(true); setAiError(''); setAiResult('');
+    try {
+      const prompt = buildAICoachPrompt(habits, logs, moods, foodLog, bodyProfile);
+      const text = await callGemini(aiApiKey, aiModel, prompt);
+      setAiResult(text);
+    } catch (e) {
+      setAiError(e.message || 'Something went wrong talking to Gemini.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
   const info = getLevelInfo(user.xp);
   const bestStreak = habits.reduce((b, h) => { const s = getStreak(logs, h.id); return s > b ? s : b; }, 0);
   const totalDone = Object.values(logs).reduce((a, d) => a + Object.values(d).filter(v => v === true).length, 0);
@@ -2228,8 +2867,8 @@ function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs,
         <TouchableOpacity onPress={() => setShowInsights(v => !v)} style={{ padding: 16 }}>
           <LinearGradient colors={[C.primary, C.primaryLight]} style={{ borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View>
-              <Text style={{ fontSize: 15, fontWeight: '800', color: '#fff' }}>🧠 AI Habit Insights</Text>
-              <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.80)', marginTop: 2 }}>Tap to see your habit personality</Text>
+              <Text style={{ fontSize: 15, fontWeight: '800', color: '#fff' }}>🧠 Quick Insights</Text>
+              <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.80)', marginTop: 2 }}>Instant, offline habit personality read</Text>
             </View>
             <Text style={{ fontSize: 24 }}>{showInsights ? '▲' : '▼'}</Text>
           </LinearGradient>
@@ -2241,6 +2880,53 @@ function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs,
                 <Text style={{ fontSize: 13, color: C.text, flex: 1, lineHeight: 20 }}>{insight}</Text>
               </View>
             ))}
+          </View>
+        )}
+      </View>
+      <View style={{ marginHorizontal: 16, marginBottom: 16, backgroundColor: C.card, borderRadius: 20, padding: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <Text style={{ fontSize: 15, fontWeight: '800', color: C.text }}>🤖 AI Coach</Text>
+          <View style={{ backgroundColor: '#43AA8B22', borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 }}>
+            <Text style={{ fontSize: 9, color: '#43AA8B', fontWeight: '800' }}>GEMINI · FREE</Text>
+          </View>
+        </View>
+        <Text style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>Real AI advice on what to do and avoid, based on your actual habits, mood & food data.</Text>
+        {editingAiKey ? (
+          <View>
+            <Text style={{ fontSize: 12, color: C.textSub, lineHeight: 18, marginBottom: 10 }}>
+              Get a free API key from Google AI Studio, then paste it below. It's stored only on this device and used to call Gemini directly.
+            </Text>
+            <TouchableOpacity onPress={() => Linking.openURL('https://aistudio.google.com/apikey')} style={{ marginBottom: 10 }}>
+              <Text style={{ color: C.primary, fontWeight: '700', fontSize: 12 }}>🔗 Open Google AI Studio to get a key</Text>
+            </TouchableOpacity>
+            <TextInput style={st.inputFull} value={aiKeyInput} onChangeText={setAiKeyInput} placeholder="Paste your Gemini API key" placeholderTextColor={C.textMuted} secureTextEntry autoCapitalize="none" />
+            <TouchableOpacity onPress={saveAiKey} style={{ backgroundColor: '#43AA8B', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4 }}>
+              <Text style={{ color: '#fff', fontWeight: '800' }}>Save Key</Text>
+            </TouchableOpacity>
+            {aiApiKey ? (
+              <TouchableOpacity onPress={() => setEditingAiKey(false)} style={{ padding: 10, alignItems: 'center' }}>
+                <Text style={{ color: C.textMuted, fontWeight: '700', fontSize: 12 }}>Cancel</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : (
+          <View>
+            <TouchableOpacity onPress={askAiCoach} disabled={aiLoading} style={{ backgroundColor: '#43AA8B', borderRadius: 12, padding: 14, alignItems: 'center', opacity: aiLoading ? 0.6 : 1 }}>
+              <Text style={{ color: '#fff', fontWeight: '800' }}>{aiLoading ? 'Thinking…' : '✨ Get Today’s AI Advice'}</Text>
+            </TouchableOpacity>
+            {aiError ? (
+              <View style={{ backgroundColor: C.dangerPale, borderRadius: 12, padding: 12, marginTop: 10 }}>
+                <Text style={{ color: C.danger, fontSize: 12, fontWeight: '600' }}>{aiError}</Text>
+              </View>
+            ) : null}
+            {aiResult ? (
+              <View style={{ backgroundColor: C.section, borderRadius: 12, padding: 14, marginTop: 10 }}>
+                <Text style={{ fontSize: 13, color: C.text, lineHeight: 20 }}>{aiResult}</Text>
+              </View>
+            ) : null}
+            <TouchableOpacity onPress={() => { setAiKeyInput(''); setEditingAiKey(true); }} style={{ padding: 10, alignItems: 'center' }}>
+              <Text style={{ color: C.textMuted, fontWeight: '700', fontSize: 12 }}>Change API key</Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -2309,7 +2995,8 @@ function HabitDetailScreen({ habit, logs, remarks, onBack, onEdit, onDelete }) {
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const remark = remarks[`${key}_${habit.id}`];
     const status = logs[key]?.[habit.id];
-    days.push({ key, date: d.getDate(), done: status === true, notdone: status === 'notdone', isToday: i === 0, remark });
+    const isRest = !!habit.restDays?.includes(d.getDay());
+    days.push({ key, date: d.getDate(), done: status === true, notdone: status === 'notdone', isRest, isToday: i === 0, remark });
   }
   const remarkDays = days.filter(d => d.remark && (d.done || d.notdone)).reverse().slice(0, 10);
   return (
@@ -2360,10 +3047,12 @@ function HabitDetailScreen({ habit, logs, remarks, onBack, onEdit, onDelete }) {
         <Text style={st.secTitle}>📅 Last 35 Days</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
           {days.map((d, i) => (
-            <View key={i} style={[{ width: 38, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, d.done && { backgroundColor: color }, d.notdone && { backgroundColor: C.danger + '44' }, !d.done && !d.notdone && { backgroundColor: C.section }, d.isToday && { borderWidth: 2, borderColor: color }]}>
-              <Text style={{ fontSize: 10, fontWeight: '700', color: d.done ? '#fff' : d.notdone ? C.danger : C.textSub }}>{d.date}</Text>
-              {d.done && <Text style={{ fontSize: 9, color: '#fff', fontWeight: '900' }}>✓</Text>}
-              {d.notdone && <Text style={{ fontSize: 9, color: C.danger, fontWeight: '900' }}>✕</Text>}
+            <View key={i} style={[{ width: 38, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, d.done && { backgroundColor: color }, d.notdone && !d.isRest && { backgroundColor: C.danger + '44' }, !d.done && !d.notdone && !d.isRest && { backgroundColor: C.section }, d.isRest && { backgroundColor: C.textMuted + '33' }, d.isToday && { borderWidth: 2, borderColor: color }]}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: d.done ? '#fff' : d.isRest ? C.textMuted : d.notdone ? C.danger : C.textSub }}>{d.date}</Text>
+              {d.isRest ? <Text style={{ fontSize: 9 }}>😴</Text> : <>
+                {d.done && <Text style={{ fontSize: 9, color: '#fff', fontWeight: '900' }}>✓</Text>}
+                {d.notdone && <Text style={{ fontSize: 9, color: C.danger, fontWeight: '900' }}>✕</Text>}
+              </>}
               {d.remark && <Text style={{ fontSize: 9 }}>{d.remark.emoji}</Text>}
             </View>
           ))}
@@ -2564,6 +3253,8 @@ export default function App() {
   const [remarks, setRemarks] = useState({});
   const [todos, setTodos] = useState({});
   const [todoLogs, setTodoLogs] = useState({});
+  const [foodLog, setFoodLog] = useState({});
+  const [bodyProfile, setBodyProfile] = useState(null);
   const [editHabit, setEditHabit] = useState(null);
   const [detailHabit, setDetailHabit] = useState(null);
   const [tab, setTab] = useState('home');
@@ -2586,8 +3277,11 @@ export default function App() {
       Store.get('todos', {}),
       Store.get('todologs', {}),
       Store.get('onboarded', false),
-    ]).then(async ([h, l, m, u, g, r, td, tl, onboarded]) => {
+      Store.get('foodLog', {}),
+      Store.get('bodyProfile', null),
+    ]).then(async ([h, l, m, u, g, r, td, tl, onboarded, fl, bp]) => {
       setHabits(h); setLogs(l); setMoods(m); setUser(u); setGoals(g); setRemarks(r); setTodos(td); setTodoLogs(tl);
+      setFoodLog(fl); setBodyProfile(bp);
       habitsRef.current = h;
       if (!onboarded) setShowOnboarding(true);
 
@@ -2791,9 +3485,10 @@ export default function App() {
         )}
         {tab === 'stats' && <StatsScreen habits={habits} logs={logs} moods={moods} onMonthly={() => setShowMonthly(true)} />}
         {tab === 'goals' && <GoalsScreen goals={goals} setGoals={setGoals} />}
-        {tab === 'profile' && <ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods} setHabits={setHabits} setLogs={setLogs} setMoods={setMoods} />}
+        {tab === 'food' && <NutritionScreen foodLog={foodLog} setFoodLog={setFoodLog} bodyProfile={bodyProfile} setBodyProfile={setBodyProfile} />}
+        {tab === 'profile' && <ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods} setHabits={setHabits} setLogs={setLogs} setMoods={setMoods} foodLog={foodLog} bodyProfile={bodyProfile} />}
         <View style={st.tabBar}>
-          {[{ id: 'home', e: '🏠', l: 'Today' }, { id: 'stats', e: '📊', l: 'Stats' }, { id: 'goals', e: '🎯', l: 'Goals' }, { id: 'profile', e: '⚡', l: 'Profile' }].map(t => (
+          {[{ id: 'home', e: '🏠', l: 'Today' }, { id: 'stats', e: '📊', l: 'Stats' }, { id: 'goals', e: '🎯', l: 'Goals' }, { id: 'food', e: '🍎', l: 'Food' }, { id: 'profile', e: '⚡', l: 'Profile' }].map(t => (
             <TouchableOpacity key={t.id} onPress={() => setTab(t.id)} style={st.tabBtn}>
               <View style={[st.tabInner, tab === t.id && st.tabInnerActive]}>
                 <Text style={{ fontSize: 18 }}>{t.e}</Text>
