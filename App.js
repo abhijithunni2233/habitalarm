@@ -20,6 +20,7 @@ import notifee, {
   RepeatFrequency,
   EventType,
 } from '@notifee/react-native';
+import { Cloud, cloudConfigured } from './cloud';
 
 const { width } = Dimensions.get('window');
 
@@ -564,6 +565,7 @@ const Store = {
   },
   async set(key, val) {
     try { await AsyncStorage.setItem(key, JSON.stringify(val)); } catch {}
+    Cloud.scheduleBackup(key);
   },
 };
 
@@ -1060,9 +1062,13 @@ function QuotesCard() {
   );
 }
 
+// How many past days (including today) the user can view and edit on Home
+const EDITABLE_DAYS = 30;
+
 function DateSelector({ selectedDate, onSelectDate, habits, logs }) {
+  const scrollRef = useRef(null);
   const dates = [];
-  for (let i = 6; i >= 0; i--) {
+  for (let i = EDITABLE_DAYS - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1070,8 +1076,9 @@ function DateSelector({ selectedDate, onSelectDate, habits, logs }) {
     dates.push({ key, day: DAYS_SHORT[d.getDay()], date: d.getDate(), isToday: i === 0, pct });
   }
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 12 }}>
-      <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 4 }}>
+    <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 12 }}
+      onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}>
+      <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 4, paddingRight: 32 }}>
         {dates.map(d => {
           const sel = selectedDate === d.key;
           const pctColor = d.pct === 100 ? C.success : d.pct > 0 ? (sel ? '#fff' : C.primary) : (sel ? 'rgba(255,255,255,0.6)' : C.textMuted);
@@ -1230,7 +1237,7 @@ function HabitCard({ h, logs, selectedDate, dayIdx, todos, todoLogs, remarks, us
               </View>
             )}
           </TouchableOpacity>
-          {isMeasurable && !isRest && !isNotDone ? (
+          {isMeasurable && !isRest ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 }}>
               <TouchableOpacity onPress={() => handleMeasurableDelta(-measurableIncrement)}
                 disabled={measurableCount <= 0}
@@ -2779,7 +2786,132 @@ function NutritionScreen({ foodLog, setFoodLog, bodyProfile, setBodyProfile }) {
   );
 }
 
-function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs, setMoods, foodLog, bodyProfile }) {
+function CloudBackupCard({ habits, onRestored }) {
+  const [account, setAccount] = useState(null);
+  const [lastBackup, setLastBackup] = useState(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const refresh = async () => {
+    setAccount(await Cloud.getUser());
+    setLastBackup(await Cloud.getLastBackup());
+  };
+  useEffect(() => { if (cloudConfigured) refresh(); }, []);
+
+  const run = async (fn) => {
+    setBusy(true); setError(''); setNotice('');
+    try { await fn(); } catch (e) { setError(e.message || 'Something went wrong. Check your internet and try again.'); }
+    finally { setBusy(false); refresh(); }
+  };
+
+  const restoreFrom = async (backup) => {
+    await Cloud.restore(backup);
+    await Cloud.link();
+    await onRestored();
+    setNotice('✓ Your data was restored from the cloud.');
+  };
+
+  const uploadThisPhone = async () => {
+    await Cloud.link();
+    await Cloud.backupNow();
+    setNotice('✓ Backup is on. Changes are saved to the cloud automatically.');
+  };
+
+  // First sign-in on this phone: decide which copy wins before any upload
+  const linkAccount = async () => {
+    const backup = await Cloud.fetchBackup();
+    if (!backup) return uploadThisPhone();
+    if (habits.length === 0) return restoreFrom(backup);
+    const when = new Date(backup.updated_at).toLocaleString();
+    await new Promise((resolve, reject) => Alert.alert('Backup found', `This account has a backup from ${when}. Which data do you want to keep?`, [
+      { text: 'Restore backup', onPress: () => restoreFrom(backup).then(resolve, reject) },
+      { text: "Keep this phone's", onPress: () => uploadThisPhone().then(resolve, reject) },
+    ], { cancelable: false }));
+  };
+
+  const signIn = () => run(async () => {
+    if (!email.trim() || !password) throw new Error('Enter your email and password.');
+    await Cloud.signIn(email.trim(), password);
+    setPassword('');
+    await linkAccount();
+  });
+
+  const signUp = () => run(async () => {
+    if (!email.trim() || password.length < 6) throw new Error('Enter your email and a password of at least 6 characters.');
+    const session = await Cloud.signUp(email.trim(), password);
+    if (!session) { setNotice('📧 Check your email and tap the confirmation link, then come back and sign in.'); return; }
+    setPassword('');
+    await linkAccount();
+  });
+
+  const restoreNow = () => run(async () => {
+    const backup = await Cloud.fetchBackup();
+    if (!backup) throw new Error('No backup found for this account yet.');
+    await new Promise((resolve, reject) => Alert.alert('Restore from cloud?', "This replaces this phone's data with the backup.", [
+      { text: 'Cancel', style: 'cancel', onPress: resolve },
+      { text: 'Restore', style: 'destructive', onPress: () => restoreFrom(backup).then(resolve, reject) },
+    ], { onDismiss: resolve }));
+  });
+
+  const signOut = () => Alert.alert('Sign out?', 'Your data stays on this phone, but new changes will not be backed up.', [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Sign out', style: 'destructive', onPress: () => run(Cloud.signOut) },
+  ]);
+
+  return (
+    <View style={{ marginHorizontal: 16, marginBottom: 16, backgroundColor: C.card, borderRadius: 20, padding: 16 }}>
+      <Text style={{ fontSize: 15, fontWeight: '800', color: C.text, marginBottom: 4 }}>☁️ Cloud Backup</Text>
+      {!cloudConfigured ? (
+        <Text style={{ fontSize: 12, color: C.textMuted }}>Cloud backup isn't set up in this build yet.</Text>
+      ) : account ? (
+        <View>
+          <Text style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>
+            Signed in as {account.email}.{'\n'}Last backup: {lastBackup ? new Date(lastBackup).toLocaleString() : 'not yet'}
+          </Text>
+          <TouchableOpacity onPress={() => run(async () => { if (!(await Cloud.backupNow())) await linkAccount(); setNotice('✓ Backed up.'); })} disabled={busy}
+            style={{ backgroundColor: C.primary, borderRadius: 12, padding: 14, alignItems: 'center', opacity: busy ? 0.6 : 1 }}>
+            <Text style={{ color: '#fff', fontWeight: '800' }}>{busy ? 'Working…' : '⬆️ Back Up Now'}</Text>
+          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+            <TouchableOpacity onPress={restoreNow} disabled={busy} style={{ padding: 10 }}>
+              <Text style={{ color: C.primary, fontWeight: '700', fontSize: 12 }}>⬇️ Restore from cloud</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={signOut} disabled={busy} style={{ padding: 10 }}>
+              <Text style={{ color: C.textMuted, fontWeight: '700', fontSize: 12 }}>Sign out</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <View>
+          <Text style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>Sign in to back up your habits automatically. If you lose or change your phone, sign in on the new one to get everything back.</Text>
+          <TextInput style={st.inputFull} value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={C.textMuted} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
+          <TextInput style={st.inputFull} value={password} onChangeText={setPassword} placeholder="Password" placeholderTextColor={C.textMuted} secureTextEntry autoCapitalize="none" />
+          <TouchableOpacity onPress={signIn} disabled={busy} style={{ backgroundColor: C.primary, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4, opacity: busy ? 0.6 : 1 }}>
+            <Text style={{ color: '#fff', fontWeight: '800' }}>{busy ? 'Working…' : 'Sign In'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={signUp} disabled={busy} style={{ padding: 10, alignItems: 'center' }}>
+            <Text style={{ color: C.primary, fontWeight: '700', fontSize: 12 }}>New here? Create an account</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {error ? (
+        <View style={{ backgroundColor: C.dangerPale, borderRadius: 12, padding: 12, marginTop: 8 }}>
+          <Text style={{ color: C.danger, fontSize: 12, fontWeight: '600' }}>{error}</Text>
+        </View>
+      ) : null}
+      {notice ? (
+        <View style={{ backgroundColor: C.section, borderRadius: 12, padding: 12, marginTop: 8 }}>
+          <Text style={{ color: C.text, fontSize: 12, fontWeight: '600' }}>{notice}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs, setMoods, foodLog, bodyProfile, onRestored }) {
   const [editName, setEditName] = useState(false);
   const [tmpName, setTmpName] = useState('');
   const [showInsights, setShowInsights] = useState(false);
@@ -2836,7 +2968,7 @@ function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs,
     const u = { ...user, name: tmpName.trim() };
     setUser(u); await Store.set('user', u); setEditName(false);
   };
-  const reset = () => Alert.alert('Reset All', 'Delete all data?', [
+  const reset = () => Alert.alert('Reset All', 'Delete all data? If cloud backup is on, the backup will be cleared too.', [
     { text: 'Cancel', style: 'cancel' },
     {
       text: 'Reset', style: 'destructive', onPress: async () => {
@@ -2863,6 +2995,7 @@ function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs,
           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>⚡ Level {info.current.level} · {info.current.title}</Text>
         </View>
       </LinearGradient>
+      <CloudBackupCard habits={habits} onRestored={onRestored} />
       <View style={{ marginHorizontal: 16, marginBottom: 16, backgroundColor: C.card, borderRadius: 20, overflow: 'hidden' }}>
         <TouchableOpacity onPress={() => setShowInsights(v => !v)} style={{ padding: 16 }}>
           <LinearGradient colors={[C.primary, C.primaryLight]} style={{ borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -3265,9 +3398,8 @@ export default function App() {
   const userRef = useRef({ xp: 0, name: 'Champion' });
   const handledNotificationIds = useRef(new Set());
 
-  useEffect(() => {
-    setupNotifications();
-    Promise.all([
+  // Reads everything from storage into state. Also re-run after a cloud restore.
+  const loadAll = () => Promise.all([
       Store.get('habits', []),
       Store.get('logs', {}),
       Store.get('moods', {}),
@@ -3283,11 +3415,18 @@ export default function App() {
       setHabits(h); setLogs(l); setMoods(m); setUser(u); setGoals(g); setRemarks(r); setTodos(td); setTodoLogs(tl);
       setFoodLog(fl); setBodyProfile(bp);
       habitsRef.current = h;
-      if (!onboarded) setShowOnboarding(true);
 
       reconcileAlarms(h);
       const backfilled = await backfillMissedDays(h, l);
       if (backfilled) { setLogs(backfilled); logsRef.current = backfilled; }
+      return { h, onboarded };
+    });
+
+  useEffect(() => {
+    setupNotifications();
+    loadAll().then(({ h, onboarded }) => {
+      if (!onboarded) setShowOnboarding(true);
+      Cloud.backupNow().catch(() => {});
 
       // Show alarm modal if app was cold-started by tapping the notification
       notifee.getInitialNotification().then((initial) => {
@@ -3486,7 +3625,7 @@ export default function App() {
         {tab === 'stats' && <StatsScreen habits={habits} logs={logs} moods={moods} onMonthly={() => setShowMonthly(true)} />}
         {tab === 'goals' && <GoalsScreen goals={goals} setGoals={setGoals} />}
         {tab === 'food' && <NutritionScreen foodLog={foodLog} setFoodLog={setFoodLog} bodyProfile={bodyProfile} setBodyProfile={setBodyProfile} />}
-        {tab === 'profile' && <ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods} setHabits={setHabits} setLogs={setLogs} setMoods={setMoods} foodLog={foodLog} bodyProfile={bodyProfile} />}
+        {tab === 'profile' && <ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods} setHabits={setHabits} setLogs={setLogs} setMoods={setMoods} foodLog={foodLog} bodyProfile={bodyProfile} onRestored={loadAll} />}
         <View style={st.tabBar}>
           {[{ id: 'home', e: '🏠', l: 'Today' }, { id: 'stats', e: '📊', l: 'Stats' }, { id: 'goals', e: '🎯', l: 'Goals' }, { id: 'food', e: '🍎', l: 'Food' }, { id: 'profile', e: '⚡', l: 'Profile' }].map(t => (
             <TouchableOpacity key={t.id} onPress={() => setTab(t.id)} style={st.tabBtn}>
