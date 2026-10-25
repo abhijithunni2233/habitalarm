@@ -1,6 +1,6 @@
 import { Audio } from 'expo-av';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, Modal, PanResponder, BackHandler, Linking, AppState } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,6 +21,7 @@ import notifee, {
   EventType,
 } from '@notifee/react-native';
 import { Cloud, cloudConfigured } from './cloud';
+import { Health } from './health';
 
 const { width } = Dimensions.get('window');
 
@@ -294,6 +295,10 @@ function getLevelInfo(xp) {
 
 function getTodayKey() {
   const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dateKeyOf(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -607,6 +612,62 @@ async function backfillMissedDays(habits, logs) {
   return nl;
 }
 
+// Pulls the last week of Home Workout sessions from Health Connect into the
+// workout log and auto-completes habits linked to Home Workout. Exercises,
+// reps and weights the user added to an imported session survive a re-sync.
+async function syncHomeWorkouts(habits, logs, workoutLog) {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 7);
+  start.setHours(0, 0, 0, 0);
+  const sessions = await Health.readHomeWorkoutSessions(start, end);
+
+  const nw = { ...workoutLog };
+  const totals = {};
+  let added = 0;
+  sessions.forEach(s => {
+    const key = dateKeyOf(new Date(s.startTime));
+    const day = [...(nw[key] || [])];
+    const idx = day.findIndex(w => w.hcId === s.hcId);
+    if (idx === -1) {
+      day.push({ id: `w_${Date.parse(s.startTime)}`, source: 'homeworkout', ...s });
+      added++;
+    } else {
+      const old = day[idx];
+      day[idx] = { ...old, title: s.title, startTime: s.startTime, endTime: s.endTime, minutes: s.minutes, calories: s.calories, exercises: old.exercises?.length ? old.exercises : s.exercises };
+    }
+    nw[key] = day;
+    const t = totals[key] || { minutes: 0, calories: 0 };
+    totals[key] = { minutes: t.minutes + s.minutes, calories: t.calories + (s.calories || 0) };
+  });
+
+  const nl = { ...logs };
+  let logsChanged = false, xp = 0;
+  Object.entries(totals).forEach(([key, t]) => {
+    const dayIdx = new Date(key + 'T00:00:00').getDay();
+    habits.forEach(h => {
+      if (!h.linkHomeWorkout || h.restDays?.includes(dayIdx)) return;
+      if (h.createdAt && h.createdAt.slice(0, 10) > key) return;
+      const cur = nl[key]?.[h.id];
+      let next;
+      if (h.habitType === 'measurable') {
+        const fromWorkout = h.unit === 'min' ? t.minutes : h.unit === 'hr' ? Math.round(t.minutes / 6) / 10 : h.unit === 'kcal' ? t.calories : 0;
+        next = fromWorkout > 0 ? fromWorkout : (h.dailyTarget || 1);
+        if (typeof cur === 'number' && cur >= next) return;
+      } else {
+        if (cur === true) return;
+        next = true;
+      }
+      nl[key] = { ...(nl[key] || {}), [h.id]: next };
+      logsChanged = true;
+      if (!(typeof cur === 'number' && cur > 0)) xp += h.highPriority ? 20 : 10;
+    });
+  });
+
+  const workoutChanged = JSON.stringify(nw) !== JSON.stringify(workoutLog);
+  return { workoutLog: workoutChanged ? nw : null, logs: logsChanged ? nl : null, xp, added, found: sessions.length };
+}
+
 // Handles notification actions when app is killed or in background
 notifee.onBackgroundEvent(async ({ type, detail }) => {
   const { pressAction, notification } = detail;
@@ -805,41 +866,207 @@ function SplashScreen({ onDone }) {
   );
 }
 
+const ONBOARDING_SLIDES = [
+  { emoji: '🏆', title: 'Build Amazing Habits', desc: 'Track your daily habits, build streaks and level up your life one day at a time.', colors: ['#4B1FC4', '#7B3FF2', '#B07CFF'], chips: ['🔥 Streaks', '⚡ XP & Levels', '🏅 Badges'] },
+  { emoji: '⏰', title: 'Never Miss a Day', desc: 'Set alarms for each habit. A full-screen alarm reminds you at the exact time every day.', colors: ['#D61F69', '#F72585', '#FF8C42'], chips: ['⏰ Alarms', '⚡ Priority', '😴 Rest days'] },
+  { emoji: '📊', title: 'See Your Progress', desc: 'View 30-day history, monthly reports and insights as you grow.', colors: ['#047F6A', '#06B88E', '#4CC9F0'], chips: ['📅 Calendar', '📄 PDF report', '🧠 Insights'] },
+  { emoji: '☁️', title: 'Safe in the Cloud', desc: 'Your habits back up automatically. Lose your phone? Sign in on a new one and everything comes back.', colors: ['#1E3FAE', '#3A6FF7', '#4CC9F0'], chips: ['☁️ Auto backup', '🔒 Private', '📱 Any phone'] },
+];
+
+// Soft translucent circles behind the gradient screens
+function GlowDecor() {
+  return (
+    <>
+      <View style={{ position: 'absolute', width: 320, height: 320, borderRadius: 160, backgroundColor: 'rgba(255,255,255,0.08)', top: -90, right: -110 }} />
+      <View style={{ position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.06)', bottom: 140, left: -90 }} />
+      <View style={{ position: 'absolute', width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.07)', bottom: -30, right: 30 }} />
+    </>
+  );
+}
+
 function OnboardingScreen({ onDone }) {
   const [page, setPage] = useState(0);
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const slides = [
-    { emoji: '🏆', title: 'Build Amazing Habits', desc: 'Track your daily habits, build streaks and level up your life one day at a time.', color: '#6C3CE1' },
-    { emoji: '⏰', title: 'Never Miss a Day', desc: 'Set alarms for each habit. Your phone reminds you at the exact time every day.', color: '#FF6B9D' },
-    { emoji: '📊', title: 'See Your Progress', desc: 'Track streaks, view 30-day history, earn XP and unlock badges as you grow.', color: '#06D6A0' },
-  ];
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(Animated.sequence([
+      Animated.timing(floatAnim, { toValue: 1, duration: 1600, useNativeDriver: true }),
+      Animated.timing(floatAnim, { toValue: 0, duration: 1600, useNativeDriver: true }),
+    ])).start();
+  }, []);
+  const slides = ONBOARDING_SLIDES;
   const next = () => {
+    Haptics.selectionAsync();
     if (page === slides.length - 1) { onDone(); return; }
-    Animated.timing(slideAnim, { toValue: -width, duration: 300, useNativeDriver: true }).start(() => {
-      slideAnim.setValue(width);
+    Animated.parallel([
+      Animated.timing(slideAnim, { toValue: -width * 0.4, duration: 220, useNativeDriver: true }),
+      Animated.timing(fadeAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
+    ]).start(() => {
+      slideAnim.setValue(width * 0.4);
       setPage(p => p + 1);
-      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 100, friction: 8 }).start();
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 90, friction: 10 }),
+        Animated.timing(fadeAnim, { toValue: 1, duration: 260, useNativeDriver: true }),
+      ]).start();
     });
   };
   const s = slides[page];
+  const last = page === slides.length - 1;
   return (
-    <View style={{ flex: 1, backgroundColor: s.color }}>
+    <LinearGradient colors={s.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, overflow: 'hidden' }}>
       <StatusBar style="light" />
-      <TouchableOpacity onPress={onDone} style={{ position: 'absolute', top: 56, right: 20, zIndex: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 99, paddingHorizontal: 14, paddingVertical: 6 }}>
-        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Skip</Text>
-      </TouchableOpacity>
-      <Animated.View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, transform: [{ translateX: slideAnim }] }}>
-        <Text style={{ fontSize: 100, marginBottom: 32 }}>{s.emoji}</Text>
-        <Text style={{ fontSize: 28, fontWeight: '900', color: '#fff', textAlign: 'center', marginBottom: 16 }}>{s.title}</Text>
-        <Text style={{ fontSize: 16, color: 'rgba(255,255,255,0.85)', textAlign: 'center', lineHeight: 24 }}>{s.desc}</Text>
-      </Animated.View>
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 32 }}>
-        {slides.map((_, i) => <View key={i} style={{ width: i === page ? 24 : 8, height: 8, borderRadius: 4, backgroundColor: i === page ? '#fff' : 'rgba(255,255,255,0.4)' }} />)}
+      <GlowDecor />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 56, paddingHorizontal: 20 }}>
+        <Text style={{ color: 'rgba(255,255,255,0.85)', fontWeight: '900', fontSize: 16, letterSpacing: 0.5 }}>⚡ Hadbit</Text>
+        {!last && (
+          <TouchableOpacity onPress={onDone} style={{ backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 99, paddingHorizontal: 16, paddingVertical: 7 }}>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Skip</Text>
+          </TouchableOpacity>
+        )}
       </View>
-      <TouchableOpacity onPress={next} style={{ marginHorizontal: 32, marginBottom: 48, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 16, padding: 18, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)' }}>
-        <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>{page === slides.length - 1 ? "Let's Start! 🚀" : 'Next →'}</Text>
+      <Animated.View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, opacity: fadeAnim, transform: [{ translateX: slideAnim }] }}>
+        <Animated.View style={{ transform: [{ translateY: floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) }], marginBottom: 40 }}>
+          <View style={{ width: 230, height: 230, borderRadius: 115, backgroundColor: 'rgba(255,255,255,0.10)', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 172, height: 172, borderRadius: 86, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', elevation: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 20 }}>
+                <Text style={{ fontSize: 60 }}>{s.emoji}</Text>
+              </View>
+            </View>
+          </View>
+        </Animated.View>
+        <Text style={{ fontSize: 30, fontWeight: '900', color: '#fff', textAlign: 'center', marginBottom: 14, letterSpacing: -0.5 }}>{s.title}</Text>
+        <Text style={{ fontSize: 16, color: 'rgba(255,255,255,0.88)', textAlign: 'center', lineHeight: 24, marginBottom: 22 }}>{s.desc}</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 }}>
+          {s.chips.map(c => (
+            <View key={c} style={{ backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 99, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.28)' }}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{c}</Text>
+            </View>
+          ))}
+        </View>
+      </Animated.View>
+      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 28 }}>
+        {slides.map((_, i) => <View key={i} style={{ width: i === page ? 28 : 8, height: 8, borderRadius: 4, backgroundColor: i === page ? '#fff' : 'rgba(255,255,255,0.35)' }} />)}
+      </View>
+      <TouchableOpacity onPress={next} activeOpacity={0.85} style={{ marginHorizontal: 28, marginBottom: 48, backgroundColor: '#fff', borderRadius: 18, padding: 18, alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 14 }}>
+        <Text style={{ color: s.colors[0], fontWeight: '900', fontSize: 17 }}>{last ? "Let's Start! 🚀" : 'Next →'}</Text>
       </TouchableOpacity>
-    </View>
+    </LinearGradient>
+  );
+}
+
+// First sign-in on this phone: decide which copy wins before any upload.
+// Resolves with a short message describing what happened.
+async function linkCloudAccount(localHabitCount, onRestored) {
+  const backup = await Cloud.fetchBackup();
+  const restore = async () => {
+    await Cloud.restore(backup);
+    await Cloud.link();
+    await onRestored();
+    return '✓ Your data was restored from the cloud.';
+  };
+  const upload = async () => {
+    await Cloud.link();
+    await Cloud.backupNow();
+    return '✓ Backup is on. Changes are saved to the cloud automatically.';
+  };
+  if (!backup) return upload();
+  if (localHabitCount === 0) return restore();
+  const when = new Date(backup.updated_at).toLocaleString();
+  return new Promise((resolve, reject) => Alert.alert('Backup found', `This account has a backup from ${when}. Which data do you want to keep?`, [
+    { text: 'Restore backup', onPress: () => restore().then(resolve, reject) },
+    { text: "Keep this phone's", onPress: () => upload().then(resolve, reject) },
+  ], { cancelable: false }));
+}
+
+// Required before using the app, so every user's data is backed up.
+function AuthScreen({ habitCount, onRestored, onDone }) {
+  const [mode, setMode] = useState('signup');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const signup = mode === 'signup';
+
+  const submit = async () => {
+    setError(''); setNotice('');
+    const em = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(em)) { setError('Enter a valid email address.'); return; }
+    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    setBusy(true);
+    try {
+      const session = signup ? await Cloud.signUp(em, password) : await Cloud.signIn(em, password);
+      if (!session) {
+        setNotice('📧 We sent a confirmation link to your email. Tap it, then come back and sign in. If you already have an account, just sign in.');
+        setMode('signin');
+        return;
+      }
+      await linkCloudAccount(habitCount, onRestored);
+      onDone();
+    } catch (e) {
+      const msg = e.message || '';
+      if (/invalid login/i.test(msg)) setError('Wrong email or password.');
+      else if (/already registered/i.test(msg)) { setError('This email already has an account. Sign in instead.'); setMode('signin'); }
+      else if (/email not confirmed/i.test(msg)) setError('Please confirm your email first. Check your inbox for the link.');
+      else if (/network|fetch/i.test(msg)) setError('No internet connection. Connect and try again.');
+      else setError(msg || 'Something went wrong. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputStyle = { backgroundColor: '#fff', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: C.text, fontWeight: '600', marginBottom: 12 };
+  return (
+    <LinearGradient colors={['#4B1FC4', '#7B3FF2', '#4CC9F0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, overflow: 'hidden' }}>
+      <StatusBar style="light" />
+      <GlowDecor />
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 60 }} keyboardShouldPersistTaps="handled">
+        <View style={{ alignItems: 'center', marginBottom: 28 }}>
+          <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginBottom: 16, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16 }}>
+            <Text style={{ fontSize: 42 }}>{signup ? '🚀' : '👋'}</Text>
+          </View>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: '#fff', textAlign: 'center' }}>{signup ? 'Create your account' : 'Welcome back'}</Text>
+          <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.85)', textAlign: 'center', marginTop: 8, lineHeight: 20 }}>
+            {signup ? 'Your habits are backed up to your account, so you never lose your progress.' : 'Sign in to restore your habits and keep them backed up.'}
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 14, padding: 4, marginBottom: 18 }}>
+          {[['signup', 'Create account'], ['signin', 'Sign in']].map(([id, label]) => (
+            <TouchableOpacity key={id} onPress={() => { setMode(id); setError(''); }} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: mode === id ? '#fff' : 'transparent' }}>
+              <Text style={{ fontWeight: '800', fontSize: 14, color: mode === id ? C.primary : '#fff' }}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TextInput style={inputStyle} value={email} onChangeText={setEmail} placeholder="Email address" placeholderTextColor={C.textMuted}
+          autoCapitalize="none" autoCorrect={false} keyboardType="email-address" autoComplete="email" />
+        <View style={{ justifyContent: 'center' }}>
+          <TextInput style={[inputStyle, { paddingRight: 60 }]} value={password} onChangeText={setPassword} placeholder={signup ? 'Choose a password (6+ characters)' : 'Password'}
+            placeholderTextColor={C.textMuted} secureTextEntry={!showPw} autoCapitalize="none" autoCorrect={false} onSubmitEditing={submit} />
+          <TouchableOpacity onPress={() => setShowPw(v => !v)} style={{ position: 'absolute', right: 14, top: 14 }}>
+            <Text style={{ color: C.primary, fontWeight: '700', fontSize: 13 }}>{showPw ? 'Hide' : 'Show'}</Text>
+          </TouchableOpacity>
+        </View>
+        {error ? (
+          <View style={{ backgroundColor: '#FFF0F0', borderRadius: 12, padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: '#D62828', fontSize: 13, fontWeight: '700' }}>{error}</Text>
+          </View>
+        ) : null}
+        {notice ? (
+          <View style={{ backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 12, padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: C.text, fontSize: 13, fontWeight: '600', lineHeight: 19 }}>{notice}</Text>
+          </View>
+        ) : null}
+        <TouchableOpacity onPress={submit} disabled={busy} activeOpacity={0.85}
+          style={{ backgroundColor: '#fff', borderRadius: 16, padding: 18, alignItems: 'center', marginTop: 4, opacity: busy ? 0.7 : 1, elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 14 }}>
+          <Text style={{ color: C.primary, fontWeight: '900', fontSize: 17 }}>{busy ? 'Please wait…' : signup ? 'Create Account →' : 'Sign In →'}</Text>
+        </TouchableOpacity>
+        <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, textAlign: 'center', marginTop: 18, lineHeight: 18 }}>
+          🔒 Only you can see your data. Remember your password — you'll need it on a new phone.
+        </Text>
+      </ScrollView>
+    </LinearGradient>
   );
 }
 
@@ -1321,7 +1548,7 @@ function HabitCard({ h, logs, selectedDate, dayIdx, todos, todoLogs, remarks, us
   );
 }
 
-function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTodos, setTodoLogs, setUser, setLogs, setMoods, setRemarks, setHabits, onAddHabit, onHabitDetail }) {
+function HomeScreen({ habits, logs, moods, user, remarks, todos, todoLogs, setTodos, setTodoLogs, setUser, setLogs, setMoods, setRemarks, setHabits, onAddHabit, onHabitDetail, workoutLog, onWorkouts }) {
   const [selectedDate, setSelectedDate] = useState(getTodayKey());
   const today = getTodayKey();
   const selDate = new Date(selectedDate + 'T00:00:00');
@@ -1521,6 +1748,26 @@ const getDailyTodos = (habitId) => {
           </View>
         )}
         <View style={{ paddingHorizontal: 16, marginBottom: 16 }}><QuotesCard /></View>
+        {(() => {
+          const ws = workoutLog[selectedDate] || [];
+          const min = Math.round(ws.reduce((a, w) => a + (parseFloat(w.minutes) || 0), 0));
+          const kcal = ws.reduce((a, w) => a + (w.calories || 0), 0);
+          const ex = ws.reduce((a, w) => a + (w.exercises?.length || 0), 0);
+          return (
+            <TouchableOpacity onPress={onWorkouts} activeOpacity={0.85} style={{ marginHorizontal: 16, marginBottom: 16, backgroundColor: C.card, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 2 }}>
+              <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: '#E76F5120', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 22 }}>🏋️</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 15, fontWeight: '800', color: C.text }}>Workouts</Text>
+                <Text style={{ fontSize: 12, color: C.textSub, marginTop: 2 }}>
+                  {ws.length === 0 ? 'Nothing logged · tap to sync or add reps & weights' : `${min} min${kcal ? ` · ${kcal} kcal` : ''}${ex ? ` · ${ex} exercise${ex !== 1 ? 's' : ''}` : ''}`}
+                </Text>
+              </View>
+              <Text style={{ fontSize: 18, color: C.textMuted, fontWeight: '800' }}>›</Text>
+            </TouchableOpacity>
+          );
+        })()}
         <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
           <View style={st.levelStrip}>
             <View style={st.levelBadge}><Text style={st.levelNum}>{info.current.level}</Text></View>
@@ -1634,6 +1881,25 @@ const getDailyTodos = (habitId) => {
   );
 }
 
+// One-tap starters on the Add Habit screen; everything stays editable after.
+const PRESET_HABITS = [
+  { name: 'Wake Up Early', icon: '🌅', color: '#F4A021', habitType: 'checkmark', alarm: { hour: 5, minute: 30 } },
+  { name: 'Meditation', icon: '🧘', color: '#9B5DE5', habitType: 'measurable', unit: 'min', dailyTarget: 10, increment: 5, alarm: { hour: 6, minute: 0 } },
+  { name: 'Jogging', icon: '🏃', color: '#FF8C42', habitType: 'measurable', unit: 'km', dailyTarget: 3, increment: 0.5, alarm: { hour: 6, minute: 15 } },
+  { name: 'Workout', icon: '🏋️', color: '#E76F51', habitType: 'checkmark', alarm: { hour: 18, minute: 0 } },
+  { name: 'Drink Water', icon: '💧', color: '#4CC9F0', habitType: 'measurable', unit: 'glasses', dailyTarget: 8, increment: 1, alarm: { hour: 9, minute: 0 } },
+  { name: 'Read Books', icon: '📚', color: '#4F8EF7', habitType: 'measurable', unit: 'pages', dailyTarget: 10, increment: 5, alarm: { hour: 21, minute: 0 } },
+  { name: 'Cycling', icon: '🚴', color: '#43AA8B', habitType: 'measurable', unit: 'km', dailyTarget: 10, increment: 1, alarm: { hour: 7, minute: 0 } },
+  { name: 'Prayer', icon: '🙏', color: '#F4A021', habitType: 'checkmark', alarm: { hour: 6, minute: 30 } },
+  { name: 'Journal', icon: '✍️', color: '#FF6B9D', habitType: 'checkmark', alarm: { hour: 22, minute: 0 } },
+  { name: 'Eat Healthy', icon: '🥗', color: '#06D6A0', habitType: 'checkmark' },
+  { name: 'Take Vitamins', icon: '💊', color: '#F72585', habitType: 'checkmark', alarm: { hour: 8, minute: 30 } },
+  { name: 'Sleep by 10:30 PM', icon: '💤', color: '#9B5DE5', habitType: 'checkmark', alarm: { hour: 22, minute: 0 } },
+  { name: 'Learn Something New', icon: '🧠', color: '#4F8EF7', habitType: 'measurable', unit: 'min', dailyTarget: 20, increment: 10 },
+  { name: 'Save Money', icon: '💰', color: '#43AA8B', habitType: 'checkmark' },
+  { name: 'No Social Media', icon: '📱', color: '#F72585', habitType: 'checkmark', habitDirection: 'quit' },
+];
+
 function AddHabitScreen({ existing, onSave, onBack }) {
   const [step, setStep] = useState(1);
   const [habitType, setHabitType] = useState(existing?.habitType || 'checkmark');
@@ -1653,6 +1919,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
   const [pickerDate, setPickerDate] = useState(new Date());
   const [saving, setSaving] = useState(false);
   const [highPriority, setHighPriority] = useState(existing?.highPriority || false);
+  const [linkHomeWorkout, setLinkHomeWorkout] = useState(existing?.linkHomeWorkout || false);
 
   const HABIT_TYPES = [
     { id: 'checkmark', label: 'Checkmark', sub: 'Track yes or no per day', icon: '✅' },
@@ -1697,6 +1964,17 @@ function AddHabitScreen({ existing, onSave, onBack }) {
     if (step === 2) return name.trim().length > 0;
     return true;
   };
+  const applyPreset = (p) => {
+    Haptics.selectionAsync();
+    setName(p.name); setIcon(p.icon); setColor(p.color);
+    setHabitType(p.habitType); setHabitDirection(p.habitDirection || 'build');
+    if (p.habitType === 'measurable') {
+      setUnit(p.unit); setDailyTarget(String(p.dailyTarget)); setIncrement(String(p.increment));
+    }
+    setReminderOn(!!p.alarm);
+    if (p.alarm) setAlarms([p.alarm]);
+    setStep(4);
+  };
   const toggleCategory = (id) => {
     Haptics.selectionAsync();
     setCategories(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -1726,6 +2004,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
       duration: existing?.duration || 0,
       alarms: finalAlarms,
       highPriority,
+      linkHomeWorkout: linkHomeWorkout && habitDirection !== 'quit',
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     await cancelHabitAlarms(habit.id);
@@ -1742,7 +2021,30 @@ function AddHabitScreen({ existing, onSave, onBack }) {
   const isLastStep = step === 4;
 
   const renderStep1 = () => (
-    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 32, paddingBottom: 120 }}>
+    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 24, paddingBottom: 120 }}>
+      {!existing && (
+        <View style={{ marginBottom: 28 }}>
+          <Text style={{ fontSize: 22, fontWeight: '900', color: C.text, marginBottom: 4 }}>⚡ Quick Start</Text>
+          <Text style={{ fontSize: 13, color: C.textMuted, marginBottom: 14 }}>Tap a popular habit to add it in seconds. You can change anything before saving.</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {PRESET_HABITS.map(p => (
+              <TouchableOpacity key={p.name} onPress={() => applyPreset(p)}
+                style={{ width: '31.5%', backgroundColor: C.card, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 6, alignItems: 'center', borderWidth: 1.5, borderColor: p.color + '40' }}>
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: p.color + '22', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 22 }}>{p.icon}</Text>
+                </View>
+                <Text numberOfLines={2} style={{ fontSize: 11, fontWeight: '800', color: C.text, textAlign: 'center' }}>{p.name}</Text>
+                {p.dailyTarget ? <Text style={{ fontSize: 10, color: p.color, fontWeight: '700', marginTop: 2 }}>{p.dailyTarget} {p.unit}</Text> : null}
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 24 }}>
+            <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
+            <Text style={{ fontSize: 12, color: C.textMuted, fontWeight: '700' }}>OR CREATE YOUR OWN</Text>
+            <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
+          </View>
+        </View>
+      )}
       <Text style={{ fontSize: 26, fontWeight: '900', color: C.text, marginBottom: 24 }}>What kind of habit?</Text>
       {HABIT_TYPES.map(t => {
         const sel = habitType === t.id;
@@ -1940,6 +2242,31 @@ function AddHabitScreen({ existing, onSave, onBack }) {
               ⚡ Alarm will include action buttons. Complete it for +20 XP (2× bonus). Skip and lose 15 XP — plus a 10pm reminder to stay accountable.
             </Text>
           </View>
+        )}
+        {Platform.OS === 'android' && habitDirection !== 'quit' && (
+          <>
+            <View style={{ height: 1, backgroundColor: C.border, marginVertical: 28 }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flex: 1, marginRight: 16 }}>
+                <Text style={{ fontSize: 18, fontWeight: '900', color: C.text }}>🏋️ Link to Home Workout</Text>
+                <Text style={{ fontSize: 13, color: C.textMuted, marginTop: 4, lineHeight: 19 }}>
+                  {habitType === 'measurable'
+                    ? 'Fills in this habit automatically when you finish a workout in the Home Workout app (minutes for min/hr, calories for kcal).'
+                    : 'Marks this habit done automatically when you finish a workout in the Home Workout app.'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => { Haptics.selectionAsync(); setLinkHomeWorkout(p => !p); }}
+                style={{ width: 52, height: 30, borderRadius: 15, backgroundColor: linkHomeWorkout ? '#E76F51' : C.section, justifyContent: 'center', paddingHorizontal: 3 }}>
+                <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', alignSelf: linkHomeWorkout ? 'flex-end' : 'flex-start' }} />
+              </TouchableOpacity>
+            </View>
+            {linkHomeWorkout && (
+              <Text style={{ fontSize: 12, color: C.textSub, marginTop: 10, lineHeight: 18 }}>
+                Connect Home Workout from Today → Workouts if you haven't yet.
+              </Text>
+            )}
+          </>
         )}
       </ScrollView>
     );
@@ -2786,11 +3113,9 @@ function NutritionScreen({ foodLog, setFoodLog, bodyProfile, setBodyProfile }) {
   );
 }
 
-function CloudBackupCard({ habits, onRestored }) {
+function CloudBackupCard({ habits, onRestored, onSignedOut }) {
   const [account, setAccount] = useState(null);
   const [lastBackup, setLastBackup] = useState(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -2814,37 +3139,9 @@ function CloudBackupCard({ habits, onRestored }) {
     setNotice('✓ Your data was restored from the cloud.');
   };
 
-  const uploadThisPhone = async () => {
-    await Cloud.link();
-    await Cloud.backupNow();
-    setNotice('✓ Backup is on. Changes are saved to the cloud automatically.');
-  };
-
-  // First sign-in on this phone: decide which copy wins before any upload
-  const linkAccount = async () => {
-    const backup = await Cloud.fetchBackup();
-    if (!backup) return uploadThisPhone();
-    if (habits.length === 0) return restoreFrom(backup);
-    const when = new Date(backup.updated_at).toLocaleString();
-    await new Promise((resolve, reject) => Alert.alert('Backup found', `This account has a backup from ${when}. Which data do you want to keep?`, [
-      { text: 'Restore backup', onPress: () => restoreFrom(backup).then(resolve, reject) },
-      { text: "Keep this phone's", onPress: () => uploadThisPhone().then(resolve, reject) },
-    ], { cancelable: false }));
-  };
-
-  const signIn = () => run(async () => {
-    if (!email.trim() || !password) throw new Error('Enter your email and password.');
-    await Cloud.signIn(email.trim(), password);
-    setPassword('');
-    await linkAccount();
-  });
-
-  const signUp = () => run(async () => {
-    if (!email.trim() || password.length < 6) throw new Error('Enter your email and a password of at least 6 characters.');
-    const session = await Cloud.signUp(email.trim(), password);
-    if (!session) { setNotice('📧 Check your email and tap the confirmation link, then come back and sign in.'); return; }
-    setPassword('');
-    await linkAccount();
+  const backUpNow = () => run(async () => {
+    if (!(await Cloud.backupNow())) setNotice(await linkCloudAccount(habits.length, onRestored));
+    else setNotice('✓ Backed up.');
   });
 
   const restoreNow = () => run(async () => {
@@ -2856,9 +3153,9 @@ function CloudBackupCard({ habits, onRestored }) {
     ], { onDismiss: resolve }));
   });
 
-  const signOut = () => Alert.alert('Sign out?', 'Your data stays on this phone, but new changes will not be backed up.', [
+  const signOut = () => Alert.alert('Sign out?', "Your data stays on this phone. You'll need to sign in again to keep using the app.", [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Sign out', style: 'destructive', onPress: () => run(Cloud.signOut) },
+    { text: 'Sign out', style: 'destructive', onPress: () => run(async () => { await Cloud.signOut(); onSignedOut(); }) },
   ]);
 
   return (
@@ -2871,7 +3168,7 @@ function CloudBackupCard({ habits, onRestored }) {
           <Text style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>
             Signed in as {account.email}.{'\n'}Last backup: {lastBackup ? new Date(lastBackup).toLocaleString() : 'not yet'}
           </Text>
-          <TouchableOpacity onPress={() => run(async () => { if (!(await Cloud.backupNow())) await linkAccount(); setNotice('✓ Backed up.'); })} disabled={busy}
+          <TouchableOpacity onPress={backUpNow} disabled={busy}
             style={{ backgroundColor: C.primary, borderRadius: 12, padding: 14, alignItems: 'center', opacity: busy ? 0.6 : 1 }}>
             <Text style={{ color: '#fff', fontWeight: '800' }}>{busy ? 'Working…' : '⬆️ Back Up Now'}</Text>
           </TouchableOpacity>
@@ -2885,17 +3182,7 @@ function CloudBackupCard({ habits, onRestored }) {
           </View>
         </View>
       ) : (
-        <View>
-          <Text style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>Sign in to back up your habits automatically. If you lose or change your phone, sign in on the new one to get everything back.</Text>
-          <TextInput style={st.inputFull} value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={C.textMuted} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
-          <TextInput style={st.inputFull} value={password} onChangeText={setPassword} placeholder="Password" placeholderTextColor={C.textMuted} secureTextEntry autoCapitalize="none" />
-          <TouchableOpacity onPress={signIn} disabled={busy} style={{ backgroundColor: C.primary, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4, opacity: busy ? 0.6 : 1 }}>
-            <Text style={{ color: '#fff', fontWeight: '800' }}>{busy ? 'Working…' : 'Sign In'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={signUp} disabled={busy} style={{ padding: 10, alignItems: 'center' }}>
-            <Text style={{ color: C.primary, fontWeight: '700', fontSize: 12 }}>New here? Create an account</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={{ fontSize: 12, color: C.textMuted }}>Not signed in.</Text>
       )}
       {error ? (
         <View style={{ backgroundColor: C.dangerPale, borderRadius: 12, padding: 12, marginTop: 8 }}>
@@ -2911,7 +3198,7 @@ function CloudBackupCard({ habits, onRestored }) {
   );
 }
 
-function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs, setMoods, foodLog, bodyProfile, onRestored }) {
+function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs, setMoods, foodLog, bodyProfile, onRestored, onSignedOut }) {
   const [editName, setEditName] = useState(false);
   const [tmpName, setTmpName] = useState('');
   const [showInsights, setShowInsights] = useState(false);
@@ -2995,7 +3282,7 @@ function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs,
           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>⚡ Level {info.current.level} · {info.current.title}</Text>
         </View>
       </LinearGradient>
-      <CloudBackupCard habits={habits} onRestored={onRestored} />
+      <CloudBackupCard habits={habits} onRestored={onRestored} onSignedOut={onSignedOut} />
       <View style={{ marginHorizontal: 16, marginBottom: 16, backgroundColor: C.card, borderRadius: 20, overflow: 'hidden' }}>
         <TouchableOpacity onPress={() => setShowInsights(v => !v)} style={{ padding: 16 }}>
           <LinearGradient colors={[C.primary, C.primaryLight]} style={{ borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -3108,6 +3395,298 @@ function ProfileScreen({ user, setUser, habits, logs, moods, setHabits, setLogs,
           <Text style={{ color: C.danger, fontWeight: '700', fontSize: 14 }}>🗑️ Reset All Data</Text>
         </TouchableOpacity>
       </View>
+    </ScrollView>
+  );
+}
+
+const EXERCISE_SUGGESTIONS = ['Push-ups', 'Squats', 'Plank', 'Crunches', 'Lunges', 'Jumping Jacks', 'Burpees', 'Mountain Climbers', 'Pull-ups', 'Dumbbell Curl', 'Bench Press', 'Deadlift', 'Shoulder Press', 'Leg Raise'];
+
+function summarizeSets(sets) {
+  const done = sets.filter(s => s.reps || s.weight);
+  if (done.length === 0) return '';
+  const reps = done.map(s => s.reps || '–');
+  const sameReps = reps.every(r => r === reps[0]);
+  const maxW = Math.max(0, ...done.map(s => parseFloat(s.weight) || 0));
+  return `${done.length} × ${sameReps ? reps[0] : reps.join('/')}${maxW > 0 ? ` @ ${maxW}kg` : ''}`;
+}
+
+// Total kg lifted (reps × weight) for one day's workouts
+function workoutVolume(sessions) {
+  let v = 0;
+  sessions.forEach(w => (w.exercises || []).forEach(x => x.sets.forEach(s => { v += (parseFloat(s.reps) || 0) * (parseFloat(s.weight) || 0); })));
+  return Math.round(v);
+}
+
+function WorkoutScreen({ workoutLog, setWorkoutLog, workoutSync, setWorkoutSync, onSync, onBack }) {
+  const today = getTodayKey();
+  const [date, setDate] = useState(today);
+  const [hcStatus, setHcStatus] = useState(null);
+  const [permitted, setPermitted] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const [addingFor, setAddingFor] = useState(null);
+  const [exerciseName, setExerciseName] = useState('');
+
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => { onBack(); return true; });
+    return () => handler.remove();
+  }, []);
+  useEffect(() => {
+    Health.status().then(async s => {
+      setHcStatus(s);
+      if (s === 'available') setPermitted(await Health.hasPermission());
+    });
+  }, []);
+
+  const sessions = workoutLog[date] || [];
+  const totalMin = sessions.reduce((a, w) => a + (parseFloat(w.minutes) || 0), 0);
+  const totalCal = sessions.reduce((a, w) => a + (w.calories || 0), 0);
+  const totalEx = sessions.reduce((a, w) => a + (w.exercises?.length || 0), 0);
+  const volume = workoutVolume(sessions);
+  const connected = workoutSync && permitted;
+
+  const saveDay = async (day) => {
+    const nw = { ...workoutLog, [date]: day };
+    if (day.length === 0) delete nw[date];
+    setWorkoutLog(nw);
+    await Store.set('workoutLog', nw);
+  };
+  const updateSession = (id, fn) => saveDay(sessions.map(w => w.id === id ? fn(w) : w));
+  const updateExercise = (sid, xid, fn) => updateSession(sid, w => ({ ...w, exercises: w.exercises.map(x => x.id === xid ? fn(x) : x) }));
+
+  // Most recent earlier day this exercise was logged, for progressive overload
+  const lastTime = (name) => {
+    const n = name.trim().toLowerCase();
+    const keys = Object.keys(workoutLog).filter(k => k < date).sort().reverse();
+    for (const k of keys) {
+      for (const w of workoutLog[k]) {
+        const x = (w.exercises || []).find(e => e.name.trim().toLowerCase() === n);
+        const sum = x && summarizeSets(x.sets);
+        if (sum) return { key: k, sum };
+      }
+    }
+    return null;
+  };
+
+  const connect = async () => {
+    Haptics.selectionAsync();
+    if (hcStatus === 'needs-install') { Health.installHealthConnect(); return; }
+    const ok = await Health.requestAccess();
+    setPermitted(ok);
+    if (!ok) {
+      Alert.alert('Permission needed', 'Allow Hadbit to read Exercise data in Health Connect to import your Home Workout sessions.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Health Connect', onPress: () => Health.openSettings() },
+      ]);
+      return;
+    }
+    setWorkoutSync(true);
+    await Store.set('workoutSync', true);
+    sync();
+  };
+  const disconnect = () => {
+    Alert.alert('Stop syncing?', 'Hadbit will stop importing Home Workout sessions. Workouts already imported stay in your log. To remove access completely, revoke it in Health Connect.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Stop syncing', style: 'destructive', onPress: async () => { setWorkoutSync(false); await Store.set('workoutSync', false); } },
+      { text: 'Open Health Connect', onPress: () => Health.openSettings() },
+    ]);
+  };
+  const sync = async () => {
+    setSyncing(true);
+    const r = await onSync();
+    setSyncing(false);
+    setLastResult(r);
+    if (r?.error) Alert.alert('Sync failed', 'Could not read from Health Connect. Check that Hadbit still has permission.');
+  };
+
+  const addManual = () => {
+    Haptics.selectionAsync();
+    saveDay([...sessions, { id: `w_${Date.now()}`, source: 'manual', title: 'Workout', minutes: '', calories: null, exercises: [] }]);
+  };
+  const deleteSession = (w) => {
+    Alert.alert('Delete workout?', w.source === 'homeworkout' ? 'This removes it from Hadbit only. It will be imported again on the next sync unless you delete it in Home Workout too.' : 'Remove this workout and its exercises?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => saveDay(sessions.filter(s => s.id !== w.id)) },
+    ]);
+  };
+  const addExercise = (sid, name) => {
+    if (!name.trim()) return;
+    Haptics.selectionAsync();
+    updateSession(sid, w => ({ ...w, exercises: [...(w.exercises || []), { id: `x_${Date.now()}`, name: name.trim(), sets: [{ reps: '', weight: '' }] }] }));
+    setExerciseName(''); setAddingFor(null);
+  };
+
+  const fmtTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso), h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
+    return `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${m} ${h >= 12 ? 'PM' : 'AM'}`;
+  };
+  const minDate = addDaysKey(today, -(EDITABLE_DAYS - 1));
+  const orange = '#E76F51';
+  const smallInput = { backgroundColor: C.section, borderRadius: 10, borderWidth: 1.5, borderColor: C.border, paddingHorizontal: 10, paddingVertical: 6, color: C.text, fontSize: 15, fontWeight: '700', minWidth: 56, textAlign: 'center' };
+
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: C.bg }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 80 }}>
+      <LinearGradient colors={[orange, '#F4A261']} style={st.screenHeader} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        <TouchableOpacity onPress={onBack} style={{ alignSelf: 'flex-start', marginBottom: 12 }}>
+          <Text style={{ color: 'rgba(255,255,255,0.9)', fontWeight: '700', fontSize: 15 }}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={st.screenHeaderTitle}>🏋️ Workouts</Text>
+        <Text style={st.screenHeaderSub}>Exercises, reps and weights — synced from Home Workout</Text>
+      </LinearGradient>
+
+      <View style={{ marginHorizontal: 16, marginBottom: 14, backgroundColor: C.card, borderRadius: 16, padding: 14, borderWidth: 1.5, borderColor: connected ? C.success + '60' : C.border }}>
+        {hcStatus === 'unsupported' ? (
+          <Text style={{ fontSize: 13, color: C.textSub, lineHeight: 19 }}>Home Workout sync uses Android Health Connect, which isn't available on this phone. You can still log workouts by hand below.</Text>
+        ) : connected ? (
+          <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ fontSize: 15, fontWeight: '800', color: C.text }}>✅ Home Workout connected</Text>
+              <TouchableOpacity onPress={sync} disabled={syncing} style={{ backgroundColor: orange, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, opacity: syncing ? 0.6 : 1 }}>
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{syncing ? 'Syncing…' : '↻ Sync now'}</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={{ fontSize: 12, color: C.textMuted, marginTop: 8, lineHeight: 17 }}>
+              {lastResult && !lastResult.error
+                ? lastResult.found === 0 ? 'No Home Workout sessions found in the last 7 days. Make sure Health Connect sync is turned on in Home Workout\'s settings.' : `Found ${lastResult.found} session${lastResult.found !== 1 ? 's' : ''} in the last 7 days${lastResult.added ? `, ${lastResult.added} new` : ''}.`
+                : 'Syncs automatically when you open Hadbit. Linked habits are marked done for you.'}
+            </Text>
+            <TouchableOpacity onPress={disconnect} style={{ marginTop: 8 }}>
+              <Text style={{ fontSize: 12, color: C.textSub, fontWeight: '700', textDecorationLine: 'underline' }}>Stop syncing</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={{ fontSize: 15, fontWeight: '800', color: C.text, marginBottom: 6 }}>🔗 Connect Home Workout</Text>
+            <Text style={{ fontSize: 12, color: C.textSub, lineHeight: 18, marginBottom: 12 }}>
+              {hcStatus === 'needs-install'
+                ? 'Install or update Health Connect from the Play Store first, then come back here.'
+                : '1. In the Home Workout app, turn on Health Connect sync in Settings.\n2. Tap Connect and allow Hadbit to read Exercise data.'}
+            </Text>
+            <TouchableOpacity onPress={connect} disabled={hcStatus === null} style={{ backgroundColor: orange, borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}>
+              <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>{hcStatus === 'needs-install' ? 'Get Health Connect' : 'Connect'}</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 16, marginBottom: 12 }}>
+        <TouchableOpacity disabled={date <= minDate} onPress={() => setDate(addDaysKey(date, -1))} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center', opacity: date <= minDate ? 0.3 : 1 }}>
+          <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>‹</Text>
+        </TouchableOpacity>
+        <Text style={{ fontSize: 15, fontWeight: '800', color: C.text }}>{date === today ? 'Today' : getDateStr(date)}</Text>
+        <TouchableOpacity disabled={date >= today} onPress={() => setDate(addDaysKey(date, 1))} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center', opacity: date >= today ? 0.3 : 1 }}>
+          <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 16 }}>
+        {[{ v: Math.round(totalMin), l: 'minutes' }, { v: totalCal || '–', l: 'kcal' }, { v: totalEx, l: 'exercises' }, { v: volume ? `${volume}` : '–', l: 'kg volume' }].map((x, i) => (
+          <View key={i} style={[st.statCard, { borderTopColor: orange, borderTopWidth: 3 }]}>
+            <Text style={{ fontSize: 17, fontWeight: '900', color: orange }}>{x.v}</Text>
+            <Text style={{ fontSize: 10, color: C.textMuted, fontWeight: '700', marginTop: 2 }}>{x.l}</Text>
+          </View>
+        ))}
+      </View>
+
+      {sessions.length === 0 && (
+        <Text style={{ textAlign: 'center', color: C.textMuted, fontSize: 13, marginVertical: 12, marginHorizontal: 32, lineHeight: 19 }}>
+          No workouts {date === today ? 'yet today' : 'on this day'}. {connected ? 'Finish one in Home Workout and tap Sync, or log one yourself.' : 'Log one yourself below.'}
+        </Text>
+      )}
+
+      {sessions.map(w => (
+        <View key={w.id} style={{ marginHorizontal: 16, marginBottom: 14, backgroundColor: C.card, borderRadius: 18, padding: 14, elevation: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {w.source === 'manual' ? (
+              <TextInput value={w.title} onChangeText={t => updateSession(w.id, x => ({ ...x, title: t }))} placeholder="Workout name" placeholderTextColor={C.textMuted}
+                style={{ flex: 1, fontSize: 17, fontWeight: '900', color: C.text, paddingVertical: 2 }} />
+            ) : (
+              <Text style={{ flex: 1, fontSize: 17, fontWeight: '900', color: C.text }} numberOfLines={1}>{w.title}</Text>
+            )}
+            <TouchableOpacity onPress={() => deleteSession(w)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={{ fontSize: 15, color: C.textMuted }}>🗑️</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 10 }}>
+            <View style={{ backgroundColor: w.source === 'homeworkout' ? orange + '20' : C.section, borderRadius: 99, paddingHorizontal: 10, paddingVertical: 3 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: w.source === 'homeworkout' ? orange : C.textSub }}>{w.source === 'homeworkout' ? '📲 Home Workout' : '✍️ Logged by you'}</Text>
+            </View>
+            {w.source === 'homeworkout' ? (
+              <Text style={{ fontSize: 12, color: C.textSub, fontWeight: '600' }}>{fmtTime(w.startTime)} · {w.minutes} min{w.calories ? ` · ${w.calories} kcal` : ''}</Text>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TextInput value={String(w.minutes ?? '')} onChangeText={t => updateSession(w.id, x => ({ ...x, minutes: t.replace(/[^0-9]/g, '') }))} keyboardType="number-pad" placeholder="0" placeholderTextColor={C.textMuted} style={[smallInput, { minWidth: 48, paddingVertical: 3, fontSize: 13 }]} />
+                <Text style={{ fontSize: 12, color: C.textSub, fontWeight: '600' }}>min</Text>
+              </View>
+            )}
+          </View>
+
+          {(w.exercises || []).map(x => {
+            const prev = lastTime(x.name);
+            return (
+              <View key={x.id} style={{ borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10, marginTop: 4, marginBottom: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ flex: 1, fontSize: 15, fontWeight: '800', color: C.text }}>{x.name}</Text>
+                  <TouchableOpacity onPress={() => updateSession(w.id, s => ({ ...s, exercises: s.exercises.filter(e => e.id !== x.id) }))} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={{ fontSize: 14, color: C.textMuted, fontWeight: '800' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                {prev && <Text style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Last time ({getDateStr(prev.key).split(',')[1].trim()}): {prev.sum}</Text>}
+                {x.sets.map((s, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                    <Text style={{ width: 44, fontSize: 12, color: C.textSub, fontWeight: '700' }}>Set {i + 1}</Text>
+                    <TextInput value={s.reps} onChangeText={t => updateExercise(w.id, x.id, e => ({ ...e, sets: e.sets.map((ss, j) => j === i ? { ...ss, reps: t.replace(/[^0-9]/g, '') } : ss) }))}
+                      keyboardType="number-pad" placeholder="0" placeholderTextColor={C.textMuted} style={smallInput} />
+                    <Text style={{ fontSize: 12, color: C.textSub }}>reps ×</Text>
+                    <TextInput value={s.weight} onChangeText={t => updateExercise(w.id, x.id, e => ({ ...e, sets: e.sets.map((ss, j) => j === i ? { ...ss, weight: t.replace(/[^0-9.]/g, '') } : ss) }))}
+                      keyboardType="decimal-pad" placeholder="0" placeholderTextColor={C.textMuted} style={smallInput} />
+                    <Text style={{ flex: 1, fontSize: 12, color: C.textSub }}>kg</Text>
+                    {x.sets.length > 1 && (
+                      <TouchableOpacity onPress={() => updateExercise(w.id, x.id, e => ({ ...e, sets: e.sets.filter((_, j) => j !== i) }))} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                        <Text style={{ fontSize: 13, color: C.textMuted }}>−</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+                <TouchableOpacity onPress={() => updateExercise(w.id, x.id, e => ({ ...e, sets: [...e.sets, { ...e.sets[e.sets.length - 1] }] }))} style={{ marginTop: 8, alignSelf: 'flex-start' }}>
+                  <Text style={{ fontSize: 12, color: orange, fontWeight: '800' }}>＋ Add set</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+
+          {addingFor === w.id ? (
+            <View style={{ borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10, marginTop: 6 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput value={exerciseName} onChangeText={setExerciseName} autoFocus placeholder="Exercise name" placeholderTextColor={C.textMuted}
+                  onSubmitEditing={() => addExercise(w.id, exerciseName)} style={[st.inputFull, { flex: 1, marginBottom: 0, paddingVertical: 10 }]} />
+                <TouchableOpacity onPress={() => addExercise(w.id, exerciseName)} style={{ backgroundColor: orange, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center' }}>
+                  <Text style={{ color: '#fff', fontWeight: '800' }}>Add</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                {EXERCISE_SUGGESTIONS.filter(n => !exerciseName || n.toLowerCase().includes(exerciseName.toLowerCase())).map(n => (
+                  <TouchableOpacity key={n} onPress={() => addExercise(w.id, n)} style={{ backgroundColor: C.section, borderRadius: 99, paddingHorizontal: 10, paddingVertical: 5 }}>
+                    <Text style={{ fontSize: 12, color: C.textSub, fontWeight: '700' }}>{n}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity onPress={() => { setAddingFor(null); setExerciseName(''); }} style={{ marginTop: 10 }}>
+                <Text style={{ fontSize: 12, color: C.textMuted, fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={() => { setAddingFor(w.id); setExerciseName(''); }} style={{ marginTop: 8, borderWidth: 1.5, borderStyle: 'dashed', borderColor: orange + '80', borderRadius: 12, paddingVertical: 10, alignItems: 'center' }}>
+              <Text style={{ fontSize: 13, color: orange, fontWeight: '800' }}>＋ Add exercise (reps & weight)</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ))}
+
+      <TouchableOpacity onPress={addManual} style={{ marginHorizontal: 16, backgroundColor: C.card, borderRadius: 14, paddingVertical: 14, alignItems: 'center', borderWidth: 1.5, borderColor: C.border }}>
+        <Text style={{ fontSize: 14, color: C.text, fontWeight: '800' }}>✍️ Log a workout manually</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -3376,6 +3955,8 @@ function FullScreenAlarmModal({ visible, habitData, onDone, onSkip }) {
 export default function App() {
   const [showSplash, setShowSplash] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // null while checking for a saved session; true shows the sign-in screen
+  const [needsAccount, setNeedsAccount] = useState(cloudConfigured ? null : false);
   const [showMonthly, setShowMonthly] = useState(false);
   const [screen, setScreen] = useState('main');
   const [habits, setHabits] = useState([]);
@@ -3388,6 +3969,8 @@ export default function App() {
   const [todoLogs, setTodoLogs] = useState({});
   const [foodLog, setFoodLog] = useState({});
   const [bodyProfile, setBodyProfile] = useState(null);
+  const [workoutLog, setWorkoutLog] = useState({});
+  const [workoutSync, setWorkoutSync] = useState(false);
   const [editHabit, setEditHabit] = useState(null);
   const [detailHabit, setDetailHabit] = useState(null);
   const [tab, setTab] = useState('home');
@@ -3396,7 +3979,28 @@ export default function App() {
   const habitsRef = useRef([]);
   const logsRef = useRef({});
   const userRef = useRef({ xp: 0, name: 'Champion' });
+  const workoutLogRef = useRef({});
+  const syncingWorkouts = useRef(false);
   const handledNotificationIds = useRef(new Set());
+
+  // Imports Home Workout sessions and applies linked-habit completions.
+  // Returns the sync result for the Workouts screen, or null if skipped.
+  const runWorkoutSync = async () => {
+    if (syncingWorkouts.current) return null;
+    if (!(await Store.get('workoutSync', false)) || !(await Health.hasPermission())) return null;
+    syncingWorkouts.current = true;
+    try {
+      const r = await syncHomeWorkouts(habitsRef.current, logsRef.current, workoutLogRef.current);
+      if (r.workoutLog) { workoutLogRef.current = r.workoutLog; setWorkoutLog(r.workoutLog); await Store.set('workoutLog', r.workoutLog); }
+      if (r.logs) { logsRef.current = r.logs; setLogs(r.logs); await Store.set('logs', r.logs); }
+      if (r.xp) { const nu = { ...userRef.current, xp: (userRef.current.xp || 0) + r.xp }; userRef.current = nu; setUser(nu); await Store.set('user', nu); }
+      return r;
+    } catch (e) {
+      return { error: true };
+    } finally {
+      syncingWorkouts.current = false;
+    }
+  };
 
   // Reads everything from storage into state. Also re-run after a cloud restore.
   const loadAll = () => Promise.all([
@@ -3411,19 +4015,25 @@ export default function App() {
       Store.get('onboarded', false),
       Store.get('foodLog', {}),
       Store.get('bodyProfile', null),
-    ]).then(async ([h, l, m, u, g, r, td, tl, onboarded, fl, bp]) => {
+      Store.get('workoutLog', {}),
+      Store.get('workoutSync', false),
+    ]).then(async ([h, l, m, u, g, r, td, tl, onboarded, fl, bp, wl, ws]) => {
       setHabits(h); setLogs(l); setMoods(m); setUser(u); setGoals(g); setRemarks(r); setTodos(td); setTodoLogs(tl);
-      setFoodLog(fl); setBodyProfile(bp);
-      habitsRef.current = h;
+      setFoodLog(fl); setBodyProfile(bp); setWorkoutLog(wl); setWorkoutSync(ws);
+      habitsRef.current = h; logsRef.current = l; userRef.current = u; workoutLogRef.current = wl;
 
       reconcileAlarms(h);
       const backfilled = await backfillMissedDays(h, l);
       if (backfilled) { setLogs(backfilled); logsRef.current = backfilled; }
+      // After backfill, so a workout done yesterday overrides its auto "not done"
+      runWorkoutSync();
       return { h, onboarded };
     });
 
   useEffect(() => {
     setupNotifications();
+    if (cloudConfigured) Promise.all([Cloud.isLinked(), Cloud.getUser().catch(() => null)])
+      .then(([linked, u]) => setNeedsAccount(!(linked || u)));
     loadAll().then(({ h, onboarded }) => {
       if (!onboarded) setShowOnboarding(true);
       Cloud.backupNow().catch(() => {});
@@ -3444,7 +4054,7 @@ export default function App() {
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (showMonthly) { setShowMonthly(false); return true; }
-      if (screen === 'addHabit' || screen === 'habitDetail') { setScreen('main'); setEditHabit(null); setDetailHabit(null); return true; }
+      if (screen === 'addHabit' || screen === 'habitDetail' || screen === 'workouts') { setScreen('main'); setEditHabit(null); setDetailHabit(null); return true; }
       return false;
     });
     return () => handler.remove();
@@ -3453,6 +4063,13 @@ export default function App() {
   useEffect(() => { habitsRef.current = habits; }, [habits]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
   useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { workoutLogRef.current = workoutLog; }, [workoutLog]);
+
+  // Pick up workouts finished in Home Workout while Hadbit was in the background
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') runWorkoutSync(); });
+    return () => sub.remove();
+  }, []);
 
   // Handle URL callbacks from AlarmActivity: hadbit://alarm?action=done&habitId=xxx
   useEffect(() => {
@@ -3602,11 +4219,17 @@ export default function App() {
 
   if (showSplash) return <SplashScreen onDone={() => setShowSplash(false)} />;
   if (showOnboarding) return <OnboardingScreen onDone={async () => { await Store.set('onboarded', true); setShowOnboarding(false); }} />;
+  if (needsAccount === null) return <View style={{ flex: 1, backgroundColor: '#4B1FC4' }} />;
+  if (needsAccount) return <AuthScreen habitCount={habits.length} onRestored={loadAll} onDone={() => setNeedsAccount(false)} />;
   if (showMonthly) return <MonthlyCalendarScreen habits={habits} logs={logs} onBack={() => setShowMonthly(false)} />;
 
   const renderScreen = () => {
     if (screen === 'addHabit') return (
       <AddHabitScreen existing={editHabit} onBack={() => { setScreen('main'); setEditHabit(null); }} onSave={async () => { await reloadHabits(); setScreen('main'); setEditHabit(null); }} />
+    );
+    if (screen === 'workouts') return (
+      <WorkoutScreen workoutLog={workoutLog} setWorkoutLog={setWorkoutLog} workoutSync={workoutSync} setWorkoutSync={setWorkoutSync}
+        onSync={runWorkoutSync} onBack={() => setScreen('main')} />
     );
     if (screen === 'habitDetail' && detailHabit) return (
       <HabitDetailScreen habit={detailHabit} logs={logs} remarks={remarks} onBack={() => { setScreen('main'); setDetailHabit(null); }} onEdit={() => { setEditHabit(detailHabit); setScreen('addHabit'); }} onDelete={() => deleteHabit(detailHabit.id)} />
@@ -3620,12 +4243,13 @@ export default function App() {
             setHabits={setHabits}
             onAddHabit={() => { setEditHabit(null); setScreen('addHabit'); }}
             onHabitDetail={(h) => { setDetailHabit(h); setScreen('habitDetail'); }}
+            workoutLog={workoutLog} onWorkouts={() => setScreen('workouts')}
           />
         )}
         {tab === 'stats' && <StatsScreen habits={habits} logs={logs} moods={moods} onMonthly={() => setShowMonthly(true)} />}
         {tab === 'goals' && <GoalsScreen goals={goals} setGoals={setGoals} />}
         {tab === 'food' && <NutritionScreen foodLog={foodLog} setFoodLog={setFoodLog} bodyProfile={bodyProfile} setBodyProfile={setBodyProfile} />}
-        {tab === 'profile' && <ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods} setHabits={setHabits} setLogs={setLogs} setMoods={setMoods} foodLog={foodLog} bodyProfile={bodyProfile} onRestored={loadAll} />}
+        {tab === 'profile' && <ProfileScreen user={user} setUser={setUser} habits={habits} logs={logs} moods={moods} setHabits={setHabits} setLogs={setLogs} setMoods={setMoods} foodLog={foodLog} bodyProfile={bodyProfile} onRestored={loadAll} onSignedOut={() => setNeedsAccount(true)} />}
         <View style={st.tabBar}>
           {[{ id: 'home', e: '🏠', l: 'Today' }, { id: 'stats', e: '📊', l: 'Stats' }, { id: 'goals', e: '🎯', l: 'Goals' }, { id: 'food', e: '🍎', l: 'Food' }, { id: 'profile', e: '⚡', l: 'Profile' }].map(t => (
             <TouchableOpacity key={t.id} onPress={() => setTab(t.id)} style={st.tabBtn}>

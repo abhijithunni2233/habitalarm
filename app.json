@@ -20,7 +20,10 @@
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.USE_EXACT_ALARM",
         "android.permission.WAKE_LOCK",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.health.READ_EXERCISE",
+        "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
+        "android.permission.health.READ_TOTAL_CALORIES_BURNED"
       ]
     },
     "plugins": [
@@ -33,7 +36,18 @@
       ],
       "expo-av",
       "./plugins/withNotificationColor",
-      "./plugins/withAlarmActivity"
+      "./plugins/withAlarmActivity",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "expo-health-connect"
     ]
   }
 }

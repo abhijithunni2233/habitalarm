@@ -15,7 +15,7 @@ export const cloudConfigured = !!(SUPABASE_URL && SUPABASE_KEY);
 // purpose: it holds the user's own Gemini API key.
 export const BACKUP_KEYS = [
   'user', 'habits', 'logs', 'moods', 'goals', 'remarks', 'todos', 'todologs',
-  'foodLog', 'bodyProfile', 'onboarded', 'lastBackfillDate',
+  'foodLog', 'bodyProfile', 'onboarded', 'lastBackfillDate', 'workoutLog', 'workoutSync',
 ];
 
 // Local-only bookkeeping (never backed up)
@@ -104,6 +104,12 @@ export const Cloud = {
     } finally {
       restoring = false;
     }
+  },
+
+  // True once this phone finished signing in. Kept locally so the app
+  // opens offline even if the saved session can't be refreshed yet.
+  async isLinked() {
+    return !!(await AsyncStorage.getItem(LINKED_KEY));
   },
 
   async link() {
