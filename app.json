@@ -7,6 +7,9 @@
     "icon": "./assets/hadbit_icon_svg.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#ffffff"
+    },
     "android": {
       "package": "in.xspare.hadbit",
       "adaptiveIcon": {
