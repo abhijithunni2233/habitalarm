@@ -130,6 +130,22 @@ export const Cloud = {
     return data.session;
   },
 
+  // Emails a one-time code. Succeeds silently for unknown emails, so it
+  // can't be used to find out who has an account.
+  async sendResetCode(email) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+  },
+
+  // The code signs the user in; the new password is then saved on the account.
+  async resetPassword(email, token, password) {
+    const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'recovery' });
+    if (error) throw error;
+    const { error: pwError } = await supabase.auth.updateUser({ password });
+    if (pwError) throw pwError;
+    return data.session;
+  },
+
   async signOut() {
     await Cloud.flushIfDirty();
     await supabase.auth.signOut();

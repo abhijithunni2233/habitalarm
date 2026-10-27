@@ -988,16 +988,30 @@ function AuthScreen({ habitCount, onRestored, onDone }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [code, setCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
   const signup = mode === 'signup';
+  const reset = mode === 'reset';
+  const askCode = reset && !codeSent;
+
+  const switchMode = (id) => { setMode(id); setError(''); setNotice(''); setCode(''); setCodeSent(false); };
 
   const submit = async () => {
     setError(''); setNotice('');
     const em = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(em)) { setError('Enter a valid email address.'); return; }
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (reset && codeSent && !/^\d{6,10}$/.test(code.trim())) { setError('Enter the code from the email.'); return; }
+    if (!askCode && password.length < 6) { setError('Password must be at least 6 characters.'); return; }
     setBusy(true);
     try {
-      const session = signup ? await Cloud.signUp(em, password) : await Cloud.signIn(em, password);
+      if (askCode) {
+        await Cloud.sendResetCode(em);
+        setCodeSent(true); setPassword('');
+        setNotice(`📧 If ${em} has an account, we emailed it a code. Enter it below with a new password.`);
+        return;
+      }
+      const session = reset ? await Cloud.resetPassword(em, code.trim(), password)
+        : signup ? await Cloud.signUp(em, password) : await Cloud.signIn(em, password);
       if (!session) {
         setNotice('📧 We sent a confirmation link to your email. Tap it, then come back and sign in. If you already have an account, just sign in.');
         setMode('signin');
@@ -1007,8 +1021,11 @@ function AuthScreen({ habitCount, onRestored, onDone }) {
       onDone();
     } catch (e) {
       const msg = e.message || '';
-      if (/invalid login/i.test(msg)) setError('Wrong email or password.');
-      else if (/already registered/i.test(msg)) { setError('This email already has an account. Sign in instead.'); setMode('signin'); }
+      if (/invalid login/i.test(msg)) setError('Wrong email or password. Forgot it? Tap "Forgot password?" below.');
+      else if (/expired|invalid/i.test(msg) && reset) setError('That code is wrong or has expired. Check the email or request a new code.');
+      else if (/rate limit|security purposes/i.test(msg)) setError('Too many emails sent. Please wait a few minutes and try again.');
+      else if (/should be different/i.test(msg)) setError('Choose a password different from your old one.');
+      else if (/already registered/i.test(msg)) { setError('This email already has an account. Sign in, or tap "Forgot password?" if you don\'t remember the password.'); setMode('signin'); }
       else if (/email not confirmed/i.test(msg)) setError('Please confirm your email first. Check your inbox for the link.');
       else if (/network|fetch/i.test(msg)) setError('No internet connection. Connect and try again.');
       else setError(msg || 'Something went wrong. Try again.');
@@ -1025,29 +1042,38 @@ function AuthScreen({ habitCount, onRestored, onDone }) {
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 60 }} keyboardShouldPersistTaps="handled">
         <View style={{ alignItems: 'center', marginBottom: 28 }}>
           <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginBottom: 16, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16 }}>
-            <Text style={{ fontSize: 42 }}>{signup ? '🚀' : '👋'}</Text>
+            <Text style={{ fontSize: 42 }}>{signup ? '🚀' : reset ? '🔑' : '👋'}</Text>
           </View>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: '#fff', textAlign: 'center' }}>{signup ? 'Create your account' : 'Welcome back'}</Text>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: '#fff', textAlign: 'center' }}>{signup ? 'Create your account' : reset ? 'Reset password' : 'Welcome back'}</Text>
           <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.85)', textAlign: 'center', marginTop: 8, lineHeight: 20 }}>
-            {signup ? 'Your habits are backed up to your account, so you never lose your progress.' : 'Sign in to restore your habits and keep them backed up.'}
+            {signup ? 'Your habits are backed up to your account, so you never lose your progress.'
+              : reset ? 'We\'ll email you a code so you can choose a new password.'
+              : 'Sign in to restore your habits and keep them backed up.'}
           </Text>
         </View>
         <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 14, padding: 4, marginBottom: 18 }}>
           {[['signup', 'Create account'], ['signin', 'Sign in']].map(([id, label]) => (
-            <TouchableOpacity key={id} onPress={() => { setMode(id); setError(''); }} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: mode === id ? '#fff' : 'transparent' }}>
+            <TouchableOpacity key={id} onPress={() => switchMode(id)} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: mode === id ? '#fff' : 'transparent' }}>
               <Text style={{ fontWeight: '800', fontSize: 14, color: mode === id ? C.primary : '#fff' }}>{label}</Text>
             </TouchableOpacity>
           ))}
         </View>
         <TextInput style={inputStyle} value={email} onChangeText={setEmail} placeholder="Email address" placeholderTextColor={C.textMuted}
-          autoCapitalize="none" autoCorrect={false} keyboardType="email-address" autoComplete="email" />
-        <View style={{ justifyContent: 'center' }}>
-          <TextInput style={[inputStyle, { paddingRight: 60 }]} value={password} onChangeText={setPassword} placeholder={signup ? 'Choose a password (6+ characters)' : 'Password'}
-            placeholderTextColor={C.textMuted} secureTextEntry={!showPw} autoCapitalize="none" autoCorrect={false} onSubmitEditing={submit} />
-          <TouchableOpacity onPress={() => setShowPw(v => !v)} style={{ position: 'absolute', right: 14, top: 14 }}>
-            <Text style={{ color: C.primary, fontWeight: '700', fontSize: 13 }}>{showPw ? 'Hide' : 'Show'}</Text>
-          </TouchableOpacity>
-        </View>
+          autoCapitalize="none" autoCorrect={false} keyboardType="email-address" autoComplete="email" editable={!(reset && codeSent)} />
+        {reset && codeSent ? (
+          <TextInput style={inputStyle} value={code} onChangeText={setCode} placeholder="Code from the email" placeholderTextColor={C.textMuted}
+            keyboardType="number-pad" autoComplete="one-time-code" maxLength={10} />
+        ) : null}
+        {!askCode ? (
+          <View style={{ justifyContent: 'center' }}>
+            <TextInput style={[inputStyle, { paddingRight: 60 }]} value={password} onChangeText={setPassword}
+              placeholder={signup ? 'Choose a password (6+ characters)' : reset ? 'New password (6+ characters)' : 'Password'}
+              placeholderTextColor={C.textMuted} secureTextEntry={!showPw} autoCapitalize="none" autoCorrect={false} onSubmitEditing={submit} />
+            <TouchableOpacity onPress={() => setShowPw(v => !v)} style={{ position: 'absolute', right: 14, top: 14 }}>
+              <Text style={{ color: C.primary, fontWeight: '700', fontSize: 13 }}>{showPw ? 'Hide' : 'Show'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         {error ? (
           <View style={{ backgroundColor: '#FFF0F0', borderRadius: 12, padding: 12, marginBottom: 12 }}>
             <Text style={{ color: '#D62828', fontSize: 13, fontWeight: '700' }}>{error}</Text>
@@ -1060,8 +1086,27 @@ function AuthScreen({ habitCount, onRestored, onDone }) {
         ) : null}
         <TouchableOpacity onPress={submit} disabled={busy} activeOpacity={0.85}
           style={{ backgroundColor: '#fff', borderRadius: 16, padding: 18, alignItems: 'center', marginTop: 4, opacity: busy ? 0.7 : 1, elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 14 }}>
-          <Text style={{ color: C.primary, fontWeight: '900', fontSize: 17 }}>{busy ? 'Please wait…' : signup ? 'Create Account →' : 'Sign In →'}</Text>
+          <Text style={{ color: C.primary, fontWeight: '900', fontSize: 17 }}>
+            {busy ? 'Please wait…' : signup ? 'Create Account →' : askCode ? 'Send Code →' : reset ? 'Save New Password →' : 'Sign In →'}
+          </Text>
         </TouchableOpacity>
+        {mode === 'signin' ? (
+          <TouchableOpacity onPress={() => switchMode('reset')} style={{ alignItems: 'center', paddingVertical: 14 }}>
+            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14, textDecorationLine: 'underline' }}>Forgot password?</Text>
+          </TouchableOpacity>
+        ) : null}
+        {reset ? (
+          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 24, paddingVertical: 14 }}>
+            {codeSent ? (
+              <TouchableOpacity onPress={() => { setCodeSent(false); setCode(''); setNotice(''); setError(''); }}>
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14, textDecorationLine: 'underline' }}>Resend code</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity onPress={() => switchMode('signin')}>
+              <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14, textDecorationLine: 'underline' }}>Back to sign in</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, textAlign: 'center', marginTop: 18, lineHeight: 18 }}>
           🔒 Only you can see your data. Remember your password — you'll need it on a new phone.
         </Text>
