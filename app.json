@@ -26,7 +26,10 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.health.READ_EXERCISE",
         "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
-        "android.permission.health.READ_TOTAL_CALORIES_BURNED"
+        "android.permission.health.READ_TOTAL_CALORIES_BURNED",
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
       ]
     },
     "plugins": [
@@ -50,7 +53,24 @@
           }
         }
       ],
-      "expo-health-connect"
+      "expo-health-connect",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "HabitsToday",
+              "label": "Hadbit – Today",
+              "description": "Today's habits with one-tap done",
+              "minWidth": "250dp",
+              "minHeight": "180dp",
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 1800000
+            }
+          ]
+        }
+      ],
+      "./plugins/withHealthConnectSdk35"
     ]
   }
 }

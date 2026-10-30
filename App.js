@@ -22,6 +22,12 @@ import notifee, {
 } from '@notifee/react-native';
 import { Cloud, cloudConfigured } from './cloud';
 import { Health } from './health';
+import { refreshHabitWidget } from './widgets/habitWidget';
+import { autoSourceOf, syncAutoHabits } from './autoSync';
+import { registerBackgroundSync } from './backgroundSync';
+
+// Keys the home-screen widget reads; a write to any of them redraws it.
+const WIDGET_KEYS = ['habits', 'logs', 'todos', 'todologs'];
 
 const { width } = Dimensions.get('window');
 
@@ -571,6 +577,7 @@ const Store = {
   async set(key, val) {
     try { await AsyncStorage.setItem(key, JSON.stringify(val)); } catch {}
     Cloud.scheduleBackup(key);
+    if (Platform.OS === 'android' && WIDGET_KEYS.includes(key)) refreshHabitWidget();
   },
 };
 
@@ -612,6 +619,21 @@ async function backfillMissedDays(habits, logs) {
   return nl;
 }
 
+// Where a habit can fill itself in from Health Connect. Older habits only
+// had the linkHomeWorkout flag.
+const AUTO_SOURCES = [
+  { id: null, icon: '✋', label: 'Off', hint: () => '' },
+  { id: 'homeworkout', icon: '🏋️', label: 'Home Workout',
+    hint: (t) => (t === 'measurable' ? 'Filled from Home Workout sessions (minutes for min/hr, calories for kcal).' : 'Done when you finish a workout in the Home Workout app.')
+      + ' Connect Home Workout from Today → Workouts if you haven\'t yet.' },
+  { id: 'workout', icon: '🏃', label: 'Any workout',
+    hint: (t) => (t === 'measurable' ? 'Filled with workout minutes from any app that writes to Health Connect (minutes for min/hr).' : 'Done when any fitness app or watch records a workout: running, gym, yoga, cycling…') },
+  { id: 'steps', icon: '👣', label: 'Steps',
+    hint: (t, target) => `Step count from your phone or watch. Done at ${target || 8000} steps. Uses Google Fit, Samsung Health, Fitbit or any app that writes steps to Health Connect.` },
+  { id: 'sleep', icon: '😴', label: 'Sleep',
+    hint: (t, target) => `Hours slept last night, from your sleep app or watch. Done at ${target || 7} h.` },
+];
+
 // Pulls the last week of Home Workout sessions from Health Connect into the
 // workout log and auto-completes habits linked to Home Workout. Exercises,
 // reps and weights the user added to an imported session survive a re-sync.
@@ -646,7 +668,7 @@ async function syncHomeWorkouts(habits, logs, workoutLog) {
   Object.entries(totals).forEach(([key, t]) => {
     const dayIdx = new Date(key + 'T00:00:00').getDay();
     habits.forEach(h => {
-      if (!h.linkHomeWorkout || h.restDays?.includes(dayIdx)) return;
+      if (autoSourceOf(h) !== 'homeworkout' || h.restDays?.includes(dayIdx)) return;
       if (h.createdAt && h.createdAt.slice(0, 10) > key) return;
       const cur = nl[key]?.[h.id];
       let next;
@@ -1964,7 +1986,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
   const [pickerDate, setPickerDate] = useState(new Date());
   const [saving, setSaving] = useState(false);
   const [highPriority, setHighPriority] = useState(existing?.highPriority || false);
-  const [linkHomeWorkout, setLinkHomeWorkout] = useState(existing?.linkHomeWorkout || false);
+  const [autoTrack, setAutoTrack] = useState(autoSourceOf(existing));
 
   const HABIT_TYPES = [
     { id: 'checkmark', label: 'Checkmark', sub: 'Track yes or no per day', icon: '✅' },
@@ -1974,7 +1996,7 @@ function AddHabitScreen({ existing, onSave, onBack }) {
     { id: 'build', label: 'Build a Habit', icon: '📈', desc: 'Add a new positive routine. Daily completions build your streak.' },
     { id: 'quit', label: 'Quit a Habit', icon: '🚫', desc: 'Break a bad habit. Track the days you successfully avoid it.' },
   ];
-  const UNITS = ['hr', 'min', 'km', 'mi', 'pages', 'glasses', 'reps', 'kcal', 'words', '$', 'Custom…'];
+  const UNITS = ['hr', 'min', 'km', 'mi', 'steps', 'pages', 'glasses', 'reps', 'kcal', 'words', '$', 'Custom…'];
   const CATEGORIES = [
     { id: 'art', label: 'Art', icon: '🎨' }, { id: 'finances', label: 'Finances', icon: '💵' },
     { id: 'fitness', label: 'Fitness', icon: '🏋️' }, { id: 'health', label: 'Health', icon: '❤️' },
@@ -1991,6 +2013,38 @@ function AddHabitScreen({ existing, onSave, onBack }) {
     });
     return () => handler.remove();
   }, [step]);
+
+  // Steps and sleep are numbers, so picking them turns the habit measurable
+  // with a sensible unit and target. Asks Health Connect for access right away.
+  const pickAutoTrack = async (id) => {
+    Haptics.selectionAsync();
+    if (!id || id === autoTrack) { setAutoTrack(null); return; }
+    const hc = await Health.status();
+    if (hc === 'needs-install') {
+      Alert.alert('Health Connect needed', 'Install Health Connect from the Play Store to auto-track habits.', [
+        { text: 'Cancel', style: 'cancel' }, { text: 'Install', onPress: () => Health.installHealthConnect() },
+      ]);
+      return;
+    }
+    if (hc !== 'available') { Alert.alert('Not supported', 'Health Connect is not available on this phone.'); return; }
+    const recordType = id === 'steps' ? 'Steps' : id === 'sleep' ? 'SleepSession' : 'ExerciseSession';
+    const asked = !(await Health.hasPermission(recordType));
+    if (asked && !(await Health.requestAccess(recordType))) {
+      Alert.alert('Permission needed', 'Allow Hadbit to read this data in Health Connect, then pick it again.', [
+        { text: 'Cancel', style: 'cancel' }, { text: 'Open Health Connect', onPress: () => Health.openSettings() },
+      ]);
+      return;
+    }
+    // Optional: without it, data only updates when Hadbit is opened
+    if (!asked && !(await Health.hasBackgroundAccess())) await Health.requestAccess(recordType);
+    if (id === 'steps' || id === 'sleep') {
+      setHabitType('measurable');
+      setUnit(id === 'steps' ? 'steps' : 'hr');
+      if (!dailyTarget || unit !== (id === 'steps' ? 'steps' : 'hr')) setDailyTarget(id === 'steps' ? '8000' : '7');
+      if (id === 'steps') setIncrement('1000');
+    }
+    setAutoTrack(id);
+  };
 
   const goNext = () => {
     Haptics.selectionAsync();
@@ -2049,7 +2103,8 @@ function AddHabitScreen({ existing, onSave, onBack }) {
       duration: existing?.duration || 0,
       alarms: finalAlarms,
       highPriority,
-      linkHomeWorkout: linkHomeWorkout && habitDirection !== 'quit',
+      autoTrack: habitDirection !== 'quit' ? autoTrack : null,
+      linkHomeWorkout: habitDirection !== 'quit' && autoTrack === 'homeworkout',
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
     await cancelHabitAlarms(habit.id);
@@ -2291,26 +2346,26 @@ function AddHabitScreen({ existing, onSave, onBack }) {
         {Platform.OS === 'android' && habitDirection !== 'quit' && (
           <>
             <View style={{ height: 1, backgroundColor: C.border, marginVertical: 28 }} />
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <View style={{ flex: 1, marginRight: 16 }}>
-                <Text style={{ fontSize: 18, fontWeight: '900', color: C.text }}>🏋️ Link to Home Workout</Text>
-                <Text style={{ fontSize: 13, color: C.textMuted, marginTop: 4, lineHeight: 19 }}>
-                  {habitType === 'measurable'
-                    ? 'Fills in this habit automatically when you finish a workout in the Home Workout app (minutes for min/hr, calories for kcal).'
-                    : 'Marks this habit done automatically when you finish a workout in the Home Workout app.'}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => { Haptics.selectionAsync(); setLinkHomeWorkout(p => !p); }}
-                style={{ width: 52, height: 30, borderRadius: 15, backgroundColor: linkHomeWorkout ? '#E76F51' : C.section, justifyContent: 'center', paddingHorizontal: 3 }}>
-                <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', alignSelf: linkHomeWorkout ? 'flex-end' : 'flex-start' }} />
-              </TouchableOpacity>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: C.text }}>⚡ Auto-track</Text>
+            <Text style={{ fontSize: 13, color: C.textMuted, marginTop: 4, marginBottom: 12, lineHeight: 19 }}>
+              Fill this habit in automatically from Health Connect, which collects data from your phone, watch and fitness apps. Updates about every 30 minutes in the background if you allow "Access data in the background", otherwise each time you open Hadbit.
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {AUTO_SOURCES.map(a => {
+                const sel = autoTrack === a.id;
+                return (
+                  <TouchableOpacity key={a.id || 'off'} onPress={() => pickAutoTrack(a.id)}
+                    style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, borderWidth: 1.5, borderColor: sel ? '#E76F51' : C.border, backgroundColor: sel ? '#E76F5120' : C.card }}>
+                    <Text style={{ fontSize: 13, fontWeight: sel ? '800' : '600', color: sel ? '#E76F51' : C.text }}>{a.icon} {a.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-            {linkHomeWorkout && (
+            {autoTrack ? (
               <Text style={{ fontSize: 12, color: C.textSub, marginTop: 10, lineHeight: 18 }}>
-                Connect Home Workout from Today → Workouts if you haven't yet.
+                {AUTO_SOURCES.find(a => a.id === autoTrack)?.hint(habitType, dailyTarget)}
               </Text>
-            )}
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -4030,15 +4085,22 @@ export default function App() {
 
   // Imports Home Workout sessions and applies linked-habit completions.
   // Returns the sync result for the Workouts screen, or null if skipped.
+  // Also fills steps, sleep and any-app workout habits from Health Connect.
   const runWorkoutSync = async () => {
     if (syncingWorkouts.current) return null;
-    if (!(await Store.get('workoutSync', false)) || !(await Health.hasPermission())) return null;
+    if (Platform.OS !== 'android') return null;
     syncingWorkouts.current = true;
     try {
-      const r = await syncHomeWorkouts(habitsRef.current, logsRef.current, workoutLogRef.current);
-      if (r.workoutLog) { workoutLogRef.current = r.workoutLog; setWorkoutLog(r.workoutLog); await Store.set('workoutLog', r.workoutLog); }
-      if (r.logs) { logsRef.current = r.logs; setLogs(r.logs); await Store.set('logs', r.logs); }
-      if (r.xp) { const nu = { ...userRef.current, xp: (userRef.current.xp || 0) + r.xp }; userRef.current = nu; setUser(nu); await Store.set('user', nu); }
+      let r = null;
+      if ((await Store.get('workoutSync', false)) && (await Health.hasPermission())) {
+        r = await syncHomeWorkouts(habitsRef.current, logsRef.current, workoutLogRef.current);
+        if (r.workoutLog) { workoutLogRef.current = r.workoutLog; setWorkoutLog(r.workoutLog); await Store.set('workoutLog', r.workoutLog); }
+        if (r.logs) { logsRef.current = r.logs; setLogs(r.logs); await Store.set('logs', r.logs); }
+      }
+      const a = await syncAutoHabits(habitsRef.current, logsRef.current);
+      if (a.logs) { logsRef.current = a.logs; setLogs(a.logs); await Store.set('logs', a.logs); }
+      const xp = (r?.xp || 0) + a.xp;
+      if (xp) { const nu = { ...userRef.current, xp: (userRef.current.xp || 0) + xp }; userRef.current = nu; setUser(nu); await Store.set('user', nu); }
       return r;
     } catch (e) {
       return { error: true };
@@ -4077,6 +4139,7 @@ export default function App() {
 
   useEffect(() => {
     setupNotifications();
+    registerBackgroundSync();
     if (cloudConfigured) Promise.all([Cloud.isLinked(), Cloud.getUser().catch(() => null)])
       .then(([linked, u]) => setNeedsAccount(!(linked || u)));
     loadAll().then(({ h, onboarded }) => {
@@ -4110,9 +4173,15 @@ export default function App() {
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { workoutLogRef.current = workoutLog; }, [workoutLog]);
 
-  // Pick up workouts finished in Home Workout while Hadbit was in the background
+  // Pick up habits ticked on the home-screen widget and workouts finished in
+  // Home Workout while Hadbit was in the background
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') runWorkoutSync(); });
+    const sub = AppState.addEventListener('change', async (s) => {
+      if (s !== 'active') return;
+      const [l, u] = await Promise.all([Store.get('logs', {}), Store.get('user', { xp: 0, name: 'Champion' })]);
+      logsRef.current = l; userRef.current = u; setLogs(l); setUser(u);
+      runWorkoutSync();
+    });
     return () => sub.remove();
   }, []);
 
@@ -4247,7 +4316,8 @@ export default function App() {
     await scheduleFollowUpReminder(habit.name);
   };
 
-  const reloadHabits = async () => { const h = await Store.get('habits', []); setHabits(h); };
+  // After the editor saves; syncs right away so a newly auto-tracked habit fills in
+  const reloadHabits = async () => { const h = await Store.get('habits', []); setHabits(h); habitsRef.current = h; runWorkoutSync(); };
   const deleteHabit = (id) => {
     Alert.alert('Delete', 'Remove this habit?', [
       { text: 'Cancel', style: 'cancel' },

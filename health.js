@@ -5,6 +5,7 @@ import {
   requestPermission,
   getGrantedPermissions,
   readRecords,
+  aggregateRecord,
   openHealthConnectSettings,
   SdkAvailabilityStatus,
 } from 'react-native-health-connect';
@@ -18,6 +19,10 @@ const PERMISSIONS = [
   { accessType: 'read', recordType: 'ExerciseSession' },
   { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
   { accessType: 'read', recordType: 'TotalCaloriesBurned' },
+  { accessType: 'read', recordType: 'Steps' },
+  { accessType: 'read', recordType: 'SleepSession' },
+  // Android 14+: lets the background task read while Hadbit is closed
+  { accessType: 'read', recordType: 'BackgroundAccessPermission' },
 ];
 
 // Health Connect's ExerciseSegmentType ids → names, for apps that record
@@ -67,20 +72,73 @@ export const Health = {
     try { openHealthConnectSettings(); } catch {}
   },
 
-  async hasPermission() {
+  // recordType: 'ExerciseSession' (default), 'Steps' or 'SleepSession'
+  async hasPermission(recordType = 'ExerciseSession') {
     if (!(await ensureInit())) return false;
     try {
       const granted = await getGrantedPermissions();
-      return granted.some(p => p.recordType === 'ExerciseSession' && p.accessType === 'read');
+      return granted.some(p => p.recordType === recordType && p.accessType === 'read');
     } catch { return false; }
   },
 
-  async requestAccess() {
+  async hasBackgroundAccess() {
+    return Health.hasPermission('BackgroundAccessPermission');
+  },
+
+  // Asks for everything Hadbit reads at once; the user can untick any of them.
+  async requestAccess(recordType = 'ExerciseSession') {
     if (!(await ensureInit())) return false;
     try {
       const granted = await requestPermission(PERMISSIONS);
-      return granted.some(p => p.recordType === 'ExerciseSession' && p.accessType === 'read');
+      return granted.some(p => p.recordType === recordType && p.accessType === 'read');
     } catch { return false; }
+  },
+
+  // Exercise sessions from every app, as total minutes per day in [start, end).
+  async readWorkoutMinutesByDay(start, end) {
+    if (!(await ensureInit())) return {};
+    const timeRangeFilter = { operator: 'between', startTime: start.toISOString(), endTime: end.toISOString() };
+    const { records } = await readRecords('ExerciseSession', { timeRangeFilter });
+    const out = {};
+    records.forEach(r => {
+      const key = dayKey(new Date(r.startTime));
+      const mins = Math.max(1, Math.round((new Date(r.endTime) - new Date(r.startTime)) / 60000));
+      out[key] = (out[key] || 0) + mins;
+    });
+    return out;
+  },
+
+  // Step count per day for the last `days` days including today. Health
+  // Connect's aggregate removes overlap when phone and watch both count.
+  async readStepsByDay(days) {
+    if (!(await ensureInit())) return {};
+    const out = {};
+    for (let i = 0; i < days; i++) {
+      const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - i);
+      const to = new Date(from); to.setDate(to.getDate() + 1);
+      try {
+        const r = await aggregateRecord({ recordType: 'Steps', timeRangeFilter: { operator: 'between', startTime: from.toISOString(), endTime: to.toISOString() } });
+        if (r.COUNT_TOTAL > 0) out[dayKey(from)] = Math.round(r.COUNT_TOTAL);
+      } catch {}
+    }
+    return out;
+  },
+
+  // Hours slept per day, counting the night that ends that morning
+  // (6 pm the day before to 6 pm that day), rounded to 0.1 h.
+  async readSleepHoursByDay(days) {
+    if (!(await ensureInit())) return {};
+    const out = {};
+    for (let i = 0; i < days; i++) {
+      const day = new Date(); day.setHours(0, 0, 0, 0); day.setDate(day.getDate() - i);
+      const from = new Date(day); from.setHours(-6);
+      const to = new Date(day); to.setHours(18);
+      try {
+        const r = await aggregateRecord({ recordType: 'SleepSession', timeRangeFilter: { operator: 'between', startTime: from.toISOString(), endTime: to.toISOString() } });
+        if (r.SLEEP_DURATION_TOTAL > 0) out[dayKey(day)] = Math.round(r.SLEEP_DURATION_TOTAL / 360) / 10;
+      } catch {}
+    }
+    return out;
   },
 
   // Home Workout sessions that started in [start, end), with calories and any
@@ -108,6 +166,10 @@ export const Health = {
     return sessions;
   },
 };
+
+function dayKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // Prefers active calories; falls back to total. Returns kcal rounded, or null.
 async function readCalories(startTime, endTime) {
